@@ -7,6 +7,22 @@ dependencies = [
     "requests>=2.31",
     "beautifulsoup4>=4.12",
     "lxml>=4.9",
+    "pre-commit>=4.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit>=4.3"
+]
+
+[tool.ruff]
+line-length = 100
+exclude = ["__pycache__", "build", "dist", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "C90", "B", "I"]
+ignore = [
+    # Ignore any specific rule codes
 ]
 
 [project.scripts]
