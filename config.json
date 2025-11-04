@@ -1,0 +1,42 @@
+{
+  "series": [
+    {
+      "name": "ちびまる子ちゃん",
+      "url": "https://tver.jp/series/sr6z4bxpf7",
+      "enabled": true,
+      "include_patterns": [],
+      "exclude_patterns": ["予告", "ダイジェスト", "解説放送版"]
+    },
+    {
+      "name": "ちょっとだけエスパー",
+      "url": "https://tver.jp/series/srm706pd6g",
+      "enabled": true,
+      "include_patterns": ["＃", "#"],
+      "exclude_patterns": ["予告", "ダイジェスト", "解説放送版", "インタビュー", "メイキング"]
+    },
+    {
+      "name": "ぼくたちん家",
+      "url": "https://tver.jp/series/...",
+      "enabled": true,
+      "include_patterns": ["＃", "#"],
+      "exclude_patterns": ["予告", "ダイジェスト", "解説放送版", "インタビュー", "メイキング"]
+    },
+    {
+      "name": "イッテQ!",
+      "url": "https://tver.jp/series/sr9gfdf2ex",
+      "enabled": true,
+      "include_patterns": [],
+      "exclude_patterns": []
+    }
+  ],
+  "download_path": "./downloads",
+  "archive_file": "downloaded.txt",
+  "debug": false,
+  "yt_dlp_options": [
+    "-o",
+    "%(series)s/%(title)s.%(ext)s",
+    "--write-sub",
+    "--sub-lang",
+    "ja"
+  ]
+}
