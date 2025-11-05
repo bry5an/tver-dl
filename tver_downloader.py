@@ -9,7 +9,6 @@ import logging
 import re
 import subprocess
 import sys
-from html import unescape
 from pathlib import Path
 from typing import Dict, List
 
@@ -30,8 +29,11 @@ class TVerDownloader:
 
         # Setup logging
         log_level = logging.DEBUG if self.debug else logging.INFO
-        logging.basicConfig(level=log_level, format="%(asctime)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S")
+        logging.basicConfig(
+            level=log_level, format="%(asctime)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S"
+        )
         self.logger = logging.getLogger(__name__)
+        self.download_report = {}  # Track downloads by series
 
     def load_config(self) -> Dict:
         """Load configuration file"""
@@ -88,7 +90,9 @@ class TVerDownloader:
                             self.logger.info(f"✓ Connected via Japan IP ({ip})")
                             return True
                         else:
-                            self.logger.warning(f"Not connected to Japan VPN (detected: {country}, IP: {ip})")
+                            self.logger.warning(
+                                f"Not connected to Japan VPN (detected: {country}, IP: {ip})"
+                            )
                             print("  TVer downloads may fail without Japanese IP")
                             response = input("Continue anyway? (y/n): ")
                             return response.lower() == "y"
@@ -109,63 +113,36 @@ class TVerDownloader:
 
     def should_download_episode(self, title: str, series_config: Dict) -> bool:
         """Check if episode should be downloaded based on series-specific filters"""
+
+        # If no filtering configured for this series, download everything
         include_patterns = series_config.get("include_patterns", [])
         exclude_patterns = series_config.get("exclude_patterns", [])
 
+        if not include_patterns and not exclude_patterns:
+            self.logger.debug(f"  No filters configured, including: {title}")
+            return True
+
         self.logger.debug(f"Checking episode: {title}")
 
-        # First check exclude patterns - if any match, reject immediately
+        # First, check exclude patterns
         for pattern in exclude_patterns:
             if pattern in title:
                 self.logger.debug(f"  -> Excluded (matched exclude pattern '{pattern}')")
                 return False
 
-        # If no include patterns are specified, accept anything that wasn't excluded
-        if not include_patterns:
-            self.logger.debug("  -> Included (no include patterns specified)")
-            return True
+        # If include patterns are specified, title must match at least one
+        if include_patterns:
+            for pattern in include_patterns:
+                if pattern in title:
+                    self.logger.debug(f"  -> Included (matched include pattern '{pattern}')")
+                    return True
+            # Didn't match any include pattern
+            self.logger.debug("  -> Excluded (no include pattern matched)")
+            return False
 
-        # With include patterns, at least one must match
-        for pattern in include_patterns:
-            if pattern in title:
-                self.logger.debug(f"  -> Included (matched include pattern '{pattern}')")
-                return True
-
-        # If we get here, no include pattern matched
-        self.logger.debug("  -> Excluded (no include pattern matched)")
-        return False
-
-    def _get_title_from_webpage(self, url: str) -> str | None:
-        """Try to fetch the episode title from the episode webpage (og:title / twitter:title / <title> / JSON)."""
-        if not url:
-            return None
-        try:
-            headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
-            resp = requests.get(url, headers=headers, timeout=10)
-            resp.raise_for_status()
-            html = resp.text
-
-            # Try multiple patterns / orders to find og:title / twitter:title / regular <title>
-            patterns = [
-                r'<meta[^>]+(?:property|name)\s*=\s*["\']og:title["\'][^>]*content\s*=\s*["\']([^"\']+)["\']',
-                r'<meta[^>]+content\s*=\s*["\']([^"\']+)["\'][^>]+(?:property|name)\s*=\s*["\']og:title["\']',
-                r'<meta[^>]+name\s*=\s*["\']twitter:title["\'][^>]*content\s*=\s*["\']([^"\']+)["\']',
-                r'"og:title"\s*:\s*["\']([^"\']+)["\']',  # JSON-like
-                r"<title[^>]*>(.*?)</title>",
-            ]
-
-            for pat in patterns:
-                m = re.search(pat, html, re.I | re.S)
-                if m:
-                    title = unescape(m.group(1).strip())
-                    if title:
-                        self.logger.debug(f"Fetched title from page: {title!r} ({url})")
-                        print(f"  Fetched title: {title}")
-                        return title
-
-        except Exception as e:
-            self.logger.debug(f"Could not fetch title from page {url}: {e}")
-        return None
+        # No include patterns, and didn't match exclude patterns
+        self.logger.debug("  -> Included (passed all filters)")
+        return True
 
     def get_episode_urls_ytdlp(self, series_url: str) -> List[Dict[str, str]]:
         """Use yt-dlp to extract episode URLs from a series page"""
@@ -175,9 +152,12 @@ class TVerDownloader:
             # Use yt-dlp's --flat-playlist to get all episode URLs without downloading
             cmd = [
                 "yt-dlp",
-                "--flat-playlist",
-                "--dump-json",
+                "--skip-download",
+                "--print",
+                "%(id)s|%(title)s|%(webpage_url)s",
                 "--no-warnings",
+                "--playlist-items",
+                "1-10",
                 series_url,
             ]
 
@@ -191,30 +171,18 @@ class TVerDownloader:
 
             episodes = []
             for line in result.stdout.strip().splitlines():
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    self.logger.debug(f"Could not parse JSON line: {line[:100]}...")
+                if not line or "|" not in line:
                     continue
 
-                episode_url = data.get("url") or data.get("webpage_url") or data.get("id")
-                if episode_url and not episode_url.startswith("http"):
-                    episode_url = f"https://tver.jp/episodes/{episode_url}"
+                parts = line.split("|", 2)
+                if len(parts) >= 3:
+                    episode_id = parts[0]
+                    title = parts[1]
+                    episode_url = parts[2]
 
-                title = data.get("title")
-                print(f"  Extracted title: {title} - {episode_url}")
-                if not title:
-                    # try to fetch from episode page (more reliable for tver)
-                    title = self._get_title_from_webpage(data.get("webpage_url") or episode_url)
-
-                # fallback to a useful placeholder if still missing
-                if not title:
-                    title = data.get("webpage_url_basename") or episode_url or data.get("id", "")
-
-                episodes.append({"url": episode_url, "title": title, "id": data.get("id", "")})
-                self.logger.debug(f"Found episode: {title} - {episode_url}")
+                    if episode_url and title:
+                        episodes.append({"url": episode_url, "title": title, "id": episode_id})
+                        self.logger.debug(f"Found episode: {title} - {episode_url}")
 
             self.logger.info(f"yt-dlp found {len(episodes)} episode(s)")
             return episodes
@@ -230,7 +198,7 @@ class TVerDownloader:
             return []
 
     def get_episode_urls_api(self, series_url: str) -> List[Dict[str, str]]:
-        """Try to get episodes via TVer's API (experimental)"""
+        """Try to get episodes via TVer's API"""
         try:
             # Extract series ID from URL
             match = re.search(r"/series/([^/]+)", series_url)
@@ -241,13 +209,14 @@ class TVerDownloader:
             series_id = match.group(1)
             self.logger.info(f"Attempting to fetch episodes via API for series: {series_id}")
 
-            # TVer API endpoint (may need adjustment)
+            # TVer API endpoint
             api_url = f"https://platform-api.tver.jp/service/api/v1/callSeriesEpisodes/{series_id}"
 
             headers = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
                 "Origin": "https://tver.jp",
                 "Referer": series_url,
+                "x-tver-platform-type": "web",
             }
 
             self.logger.debug(f"API request URL: {api_url}")
@@ -258,19 +227,44 @@ class TVerDownloader:
             self.logger.debug(f"API response keys: {data.keys()}")
 
             episodes = []
-            # Parse API response (structure may vary)
-            episode_list = data.get("result", {}).get("contents", [])
+            # TVer API can have different structures - try multiple paths
+            if "result" in data and "contents" in data["result"]:
+                episode_list = data["result"]["contents"]
+            elif "episodes" in data:
+                episode_list = data["episodes"]
+            elif isinstance(data, list):
+                episode_list = data
+            else:
+                self.logger.debug(f"Unexpected API response structure. Keys: {data.keys()}")
+                episode_list = []
 
             for ep in episode_list:
-                episode_id = ep.get("id") or ep.get("content", {}).get("id")
+                # Try different ways to get episode ID and title
+                episode_id = ep.get("id") or ep.get("episodeID") or ep.get("content", {}).get("id")
+                title = (
+                    ep.get("title")
+                    or ep.get("episodeTitle")
+                    or ep.get("content", {}).get("title")
+                    or ep.get("broadcastDateLabel", "")
+                )
+
                 if episode_id:
                     episode_url = f"https://tver.jp/episodes/{episode_id}"
-                    title = ep.get("title") or ep.get("content", {}).get("title", episode_id)
 
-                    episodes.append({"url": episode_url, "title": title, "id": episode_id})
-                    self.logger.debug(f"Found episode via API: {title} - {episode_url}")
+                    # Some series might have series name in title already, clean it if needed
+                    if title:
+                        episodes.append({"url": episode_url, "title": title, "id": episode_id})
+                        self.logger.debug(f"Found episode via API: {title} - {episode_url}")
 
-            self.logger.info(f"API found {len(episodes)} episode(s)")
+            if episodes:
+                self.logger.info(f"API found {len(episodes)} episode(s)")
+            else:
+                self.logger.warning("API returned data but couldn't parse episodes")
+                if self.debug:
+                    self.logger.debug(
+                        f"API response: {json.dumps(data, indent=2, ensure_ascii=False)[:500]}"
+                    )
+
             return episodes
 
         except Exception as e:
@@ -281,14 +275,14 @@ class TVerDownloader:
         """Get episode URLs using multiple methods"""
         episodes = []
 
-        # Try method 1: yt-dlp extraction (most reliable)
-        self.logger.info("Method 1: Trying yt-dlp extraction...")
-        episodes = self.get_episode_urls_ytdlp(series_url)
+        # Try method 1: TVer API (faster)
+        self.logger.info("Method 1: Trying TVer API...")
+        episodes = self.get_episode_urls_api(series_url)
 
-        # Try method 2: API if yt-dlp fails
+        # Try method 2: yt-dlp if API fails (slower but more reliable)
         if not episodes:
-            self.logger.info("Method 2: Trying TVer API...")
-            episodes = self.get_episode_urls_api(series_url)
+            self.logger.info("Method 2: Trying yt-dlp extraction (this may take a minute)...")
+            episodes = self.get_episode_urls_ytdlp(series_url)
 
         # Remove duplicates based on URL
         seen_urls = set()
@@ -304,7 +298,9 @@ class TVerDownloader:
 
         return unique_episodes
 
-    def download_episodes(self, episodes: List[Dict[str, str]], series_name: str, series_config: Dict) -> int:
+    def download_episodes(
+        self, episodes: List[Dict[str, str]], series_name: str, series_config: Dict
+    ) -> int:
         """Download episodes using yt-dlp with archive support"""
         if not episodes:
             return 0
@@ -338,9 +334,19 @@ class TVerDownloader:
             self.logger.info(f"Downloading {len(episodes)} episode(s) with yt-dlp...")
             self.logger.info("(yt-dlp will skip already downloaded episodes)")
 
-            result = subprocess.run(cmd, capture_output=False, text=True)
+            # Initialize series in report if not exists
+            if series_name not in self.download_report:
+                self.download_report[series_name] = []
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
 
             if result.returncode == 0:
+                # Parse yt-dlp output to find successfully downloaded episodes
+                for line in result.stdout.splitlines():
+                    if "[download] Destination:" in line:
+                        episode_title = line.split("Destination: ")[-1].split("/")[-1]
+                        self.download_report[series_name].append(episode_title)
+
                 self.logger.info("✓ Download process completed")
                 return len(episodes)
             else:
@@ -386,7 +392,9 @@ class TVerDownloader:
 
         if len(episodes_to_download) < len(all_episodes):
             excluded_count = len(all_episodes) - len(episodes_to_download)
-            self.logger.info(f"Filtered to {len(episodes_to_download)} episode(s) (excluded {excluded_count})")
+            self.logger.info(
+                f"Filtered to {len(episodes_to_download)} episode(s) (excluded {excluded_count})"
+            )
 
         self.logger.info("\nEpisodes to download:")
         for i, ep in enumerate(episodes_to_download, 1):
@@ -423,8 +431,20 @@ class TVerDownloader:
                 count = self.process_series(series)
                 total_downloaded += count
             except Exception as e:
-                self.logger.error(f"Error processing {series.get('name', 'Unknown')}: {e}", exc_info=self.debug)
+                self.logger.error(
+                    f"Error processing {series.get('name', 'Unknown')}: {e}", exc_info=self.debug
+                )
                 continue
+
+        # Display download report
+        if self.download_report:
+            print("\nDownload Report")
+            print("=" * 60)
+            for series_name, episodes in self.download_report.items():
+                if episodes:  # Only show series that had downloads
+                    print(f"\n{series_name}:")
+                    for i, episode in enumerate(episodes, 1):
+                        print(f"  {i}. {episode}")
 
         print(f"\n{'=' * 60}")
         self.logger.info(f"Complete! Processed {total_downloaded} episode(s)")
