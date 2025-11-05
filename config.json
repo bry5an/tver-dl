@@ -15,6 +15,13 @@
       "exclude_patterns": ["予告", "ダイジェスト", "解説放送版", "インタビュー", "メイキング"]
     },
     {
+      "name": "じゃあ、あんたが作ってみろよ",
+      "url": "https://tver.jp/series/srp2094kb1",
+      "enabled": false,
+      "include_patterns": ["＃", "#", "第"],
+      "exclude_patterns": ["予告", "ダイジェスト", "解説放送版", "インタビュー", "メイキング"]
+    },
+    {
       "name": "ぼくたちん家",
       "url": "https://tver.jp/series/sr62ncyo3g",
       "enabled": false,
@@ -24,7 +31,7 @@
     {
       "name": "パパと親父のウチご飯",
       "url": "https://tver.jp/series/srfm9xtlst",
-      "enabled": true,
+      "enabled": false,
       "include_patterns": ["＃", "#", "第"],
       "exclude_patterns": ["予告", "ダイジェスト", "解説放送版", "インタビュー", "メイキング"]
     },
@@ -45,7 +52,7 @@
     {
       "name": "小さい頃は、神様がいて",
       "url": "https://tver.jp/series/srare35roj",
-      "enabled": true,
+      "enabled": false,
       "include_patterns": ["＃", "#", "第"],
       "exclude_patterns": ["予告", "ダイジェスト", "解説放送版", "インタビュー", "メイキング"]
     },
