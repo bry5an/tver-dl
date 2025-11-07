@@ -9,7 +9,7 @@ Automatically download new episodes from TVer series pages using yt-dlp.
    brew install yt-dlp
    ```
 
-2. **NordVPN** - Connect to a Japanese server before running the script
+2. **VPN** - Connect to a Japanese server before running the script
 
 3. **uv** - For Python dependency management:
    ```bash

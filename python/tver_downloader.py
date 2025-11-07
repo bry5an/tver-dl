@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, List
+import argparse
 
 # Try to import required packages
 try:
@@ -450,13 +451,31 @@ class TVerDownloader:
         self.logger.info(f"Complete! Processed {total_downloaded} episode(s)")
         print(f"{'=' * 60}")
 
+def fetch_episodes_only(series_url: str):
+    """Fetch episodes and output as JSON for the app"""
+    downloader = TVerDownloader(debug=False)
+    episodes = downloader.get_episode_urls(series_url)
+    import json
+    print(json.dumps(episodes))
 
 def main():
-    # Check for debug flag in command line
-    debug = "--debug" in sys.argv or "-d" in sys.argv
-    downloader = TVerDownloader(debug=debug)
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--debug', '-d', action='store_true')
+    parser.add_argument('--fetch-episodes', help='Fetch episodes for a series URL')
+    parser.add_argument('--config', help='Config file path')
+    
+    args = parser.parse_args()
+    
+    if args.fetch_episodes:
+        fetch_episodes_only(args.fetch_episodes)
+        return
+    
+    downloader = TVerDownloader(
+        config_path=args.config if args.config else "config.json",
+        debug=args.debug
+    )
     downloader.run()
-
 
 if __name__ == "__main__":
     main()
