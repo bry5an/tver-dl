@@ -21,6 +21,7 @@ struct Series {
     enabled: bool,
     include_patterns: Vec<String>,
     exclude_patterns: Vec<String>,
+    thumbnail_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

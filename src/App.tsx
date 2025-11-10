@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
-import { Plus, Play, Settings, Wifi, Download, Trash2, Edit2 } from 'lucide-react';
+import { Plus, Play, Wifi, Download, Trash2, Edit2, Loader2 } from 'lucide-react';
 
 interface Series {
   name: string;
@@ -9,6 +9,7 @@ interface Series {
   enabled: boolean;
   include_patterns: string[];
   exclude_patterns: string[];
+  thumbnail_url?: string;
 }
 
 interface Config {
@@ -19,10 +20,14 @@ interface Config {
   yt_dlp_options: string[];
 }
 
-interface Episode {
-  url: string;
-  title: string;
-  id: string;
+interface DownloadProgress {
+  series_name: string;
+  episode_title: string;
+  file_type: string;
+  percent: number;
+  speed: string;
+  eta: string;
+  status: string;
 }
 
 function App() {
@@ -31,6 +36,7 @@ function App() {
   const [isChecking, setIsChecking] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadLogs, setDownloadLogs] = useState<string[]>([]);
+  const [downloadProgress, setDownloadProgress] = useState<Map<string, DownloadProgress>>(new Map());
   const [showAddSeries, setShowAddSeries] = useState(false);
   const [editingSeries, setEditingSeries] = useState<Series | null>(null);
   const [selectedTab, setSelectedTab] = useState<'series' | 'settings' | 'logs'>('series');
@@ -40,12 +46,22 @@ function App() {
     checkVPN();
 
     // Listen for download progress
-    const unlisten = listen('download-progress', (event) => {
-      setDownloadLogs(prev => [...prev, event.payload as string]);
+    const unlistenProgress = listen<DownloadProgress>('download-progress', (event) => {
+      setDownloadProgress(prev => {
+        const newMap = new Map(prev);
+        newMap.set(event.payload.series_name, event.payload);
+        return newMap;
+      });
+    });
+
+    // Listen for download logs
+    const unlistenLog = listen<string>('download-log', (event) => {
+      setDownloadLogs(prev => [...prev, event.payload]);
     });
 
     return () => {
-      unlisten.then(fn => fn());
+      unlistenProgress.then(fn => fn());
+      unlistenLog.then(fn => fn());
     };
   }, []);
 
@@ -84,6 +100,7 @@ function App() {
     
     setIsDownloading(true);
     setDownloadLogs([]);
+    setDownloadProgress(new Map());
     
     try {
       await invoke('download_episodes', { config });
@@ -92,6 +109,7 @@ function App() {
       setDownloadLogs(prev => [...prev, `Error: ${error}`]);
     } finally {
       setIsDownloading(false);
+      setDownloadProgress(new Map());
     }
   };
 
@@ -127,7 +145,7 @@ function App() {
   if (!config) {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
-        <div className="text-xl">Loading...</div>
+        <Loader2 className="w-8 h-8 animate-spin" />
       </div>
     );
   }
@@ -148,7 +166,7 @@ function App() {
               disabled={isChecking}
               className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50"
             >
-              <Wifi className="w-4 h-4" />
+              {isChecking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
               Check VPN
             </button>
             
@@ -157,7 +175,7 @@ function App() {
               disabled={isDownloading || config.series.filter(s => s.enabled).length === 0}
               className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Play className="w-4 h-4" />
+              {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
               {isDownloading ? 'Downloading...' : 'Download Episodes'}
             </button>
           </div>
@@ -240,67 +258,113 @@ function App() {
               </div>
             ) : (
               <div className="grid gap-4">
-                {config.series.map((series, index) => (
-                  <div
-                    key={index}
-                    className={`bg-gray-800 rounded-lg p-6 border-2 transition-all ${
-                      series.enabled ? 'border-blue-500/50' : 'border-transparent opacity-60'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <input
-                            type="checkbox"
-                            checked={series.enabled}
-                            onChange={() => toggleSeries(index)}
-                            className="w-5 h-5 rounded border-gray-600 bg-gray-700"
-                          />
-                          <h3 className="text-lg font-semibold">{series.name}</h3>
-                        </div>
-                        
-                        <p className="text-sm text-gray-400 mb-3 font-mono">{series.url}</p>
-                        
-                        <div className="flex gap-4 text-sm">
-                          <div>
-                            <span className="text-gray-400">Include:</span>
-                            <span className="ml-2 text-blue-400">
-                              {series.include_patterns.length > 0 
-                                ? series.include_patterns.join(', ') 
-                                : 'All'}
-                            </span>
+                {config.series.map((series, index) => {
+                  const progress = downloadProgress.get(series.name);
+                  
+                  return (
+                    <div
+                      key={index}
+                      className={`bg-gray-800 rounded-lg overflow-hidden border-2 transition-all ${
+                        series.enabled ? 'border-blue-500/50' : 'border-transparent opacity-60'
+                      }`}
+                    >
+                      <div className="flex">
+                        {/* Thumbnail */}
+                        {series.thumbnail_url && (
+                          <div className="w-40 h-40 flex-shrink-0 bg-gray-700">
+                            <img 
+                              src={series.thumbnail_url} 
+                              alt={series.name}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
                           </div>
-                          <div>
-                            <span className="text-gray-400">Exclude:</span>
-                            <span className="ml-2 text-red-400">
-                              {series.exclude_patterns.length > 0 
-                                ? series.exclude_patterns.join(', ') 
-                                : 'None'}
-                            </span>
+                        )}
+                        
+                        {/* Content */}
+                        <div className="flex-1 p-6">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <input
+                                  type="checkbox"
+                                  checked={series.enabled}
+                                  onChange={() => toggleSeries(index)}
+                                  className="w-5 h-5 rounded border-gray-600 bg-gray-700"
+                                />
+                                <h3 className="text-lg font-semibold">{series.name}</h3>
+                              </div>
+                              
+                              <p className="text-xs text-gray-400 mb-3 font-mono">{series.url}</p>
+                              
+                              <div className="flex gap-4 text-sm">
+                                <div>
+                                  <span className="text-gray-400">Include:</span>
+                                  <span className="ml-2 text-blue-400">
+                                    {series.include_patterns.length > 0 
+                                      ? series.include_patterns.join(', ') 
+                                      : 'All'}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">Exclude:</span>
+                                  <span className="ml-2 text-red-400">
+                                    {series.exclude_patterns.length > 0 
+                                      ? series.exclude_patterns.join(', ') 
+                                      : 'None'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => {
+                                  setEditingSeries(series);
+                                  setShowAddSeries(true);
+                                }}
+                                className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => deleteSeries(index)}
+                                className="p-2 bg-gray-700 hover:bg-red-600 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
+                          
+                          {/* Progress Bar */}
+                          {progress && (
+                            <div className="mt-4">
+                              <div className="flex items-center justify-between text-sm mb-2">
+                                <span className="text-gray-300 truncate flex-1 mr-4">
+                                  {progress.episode_title}
+                                </span>
+                                <span className="text-gray-400 text-xs">
+                                  {progress.speed} • {progress.eta} • {progress.file_type}
+                                </span>
+                              </div>
+                              <div className="w-full bg-gray-700 rounded-full h-2 overflow-hidden">
+                                <div 
+                                  className="bg-blue-500 h-full transition-all duration-300 ease-out"
+                                  style={{ width: `${progress.percent}%` }}
+                                />
+                              </div>
+                              <div className="text-right text-xs text-gray-400 mt-1">
+                                {progress.percent.toFixed(1)}%
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                      
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => {
-                            setEditingSeries(series);
-                            setShowAddSeries(true);
-                          }}
-                          className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => deleteSeries(index)}
-                          className="p-2 bg-gray-700 hover:bg-red-600 rounded-lg transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -348,7 +412,7 @@ function App() {
           <div>
             <h2 className="text-xl font-semibold mb-6">Download Logs</h2>
             
-            <div className="bg-gray-800 rounded-lg p-6 font-mono text-sm">
+            <div className="bg-gray-800 rounded-lg p-6 font-mono text-xs max-h-[600px] overflow-y-auto">
               {downloadLogs.length === 0 ? (
                 <p className="text-gray-400">No downloads yet. Start a download to see logs here.</p>
               ) : (
@@ -392,6 +456,39 @@ function SeriesModal({
   const [url, setUrl] = useState(series?.url || '');
   const [includePatterns, setIncludePatterns] = useState(series?.include_patterns.join(', ') || '');
   const [excludePatterns, setExcludePatterns] = useState(series?.exclude_patterns.join(', ') || '');
+  const [thumbnailUrl, setThumbnailUrl] = useState(series?.thumbnail_url || '');
+  const [isFetchingMetadata, setIsFetchingMetadata] = useState(false);
+
+  const fetchMetadata = async () => {
+    if (!url) return;
+    
+    setIsFetchingMetadata(true);
+    try {
+      const metadata = await invoke<any>('fetch_series_metadata', { seriesUrl: url });
+      
+      // Extract series info from TVer API response
+      const result = metadata.result || metadata;
+      if (result.content) {
+        const content = result.content;
+        
+        // Set name if not already set
+        if (!name && content.title) {
+          setName(content.title);
+        }
+        
+        // Extract thumbnail URL
+        if (content.thumbnailURL) {
+          setThumbnailUrl(content.thumbnailURL);
+        } else if (content.image && content.image.url) {
+          setThumbnailUrl(content.image.url);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch metadata:', error);
+    } finally {
+      setIsFetchingMetadata(false);
+    }
+  };
 
   const handleSave = () => {
     if (!name || !url) return;
@@ -402,6 +499,7 @@ function SeriesModal({
       enabled: series?.enabled ?? true,
       include_patterns: includePatterns.split(',').map(p => p.trim()).filter(p => p),
       exclude_patterns: excludePatterns.split(',').map(p => p.trim()).filter(p => p),
+      thumbnail_url: thumbnailUrl || undefined,
     });
   };
 
@@ -414,6 +512,27 @@ function SeriesModal({
         
         <div className="space-y-4">
           <div>
+            <label className="block text-sm font-medium mb-2">Series URL</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://tver.jp/series/..."
+                className="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-blue-500"
+              />
+              <button
+                onClick={fetchMetadata}
+                disabled={!url || isFetchingMetadata}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {isFetchingMetadata ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Fetch'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">Click "Fetch" to auto-fill series info</p>
+          </div>
+          
+          <div>
             <label className="block text-sm font-medium mb-2">Series Name</label>
             <input
               type="text"
@@ -424,16 +543,17 @@ function SeriesModal({
             />
           </div>
           
-          <div>
-            <label className="block text-sm font-medium mb-2">Series URL</label>
-            <input
-              type="text"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://tver.jp/series/..."
-              className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-blue-500"
-            />
-          </div>
+          {thumbnailUrl && (
+            <div>
+              <label className="block text-sm font-medium mb-2">Thumbnail Preview</label>
+              <img 
+                src={thumbnailUrl} 
+                alt="Series thumbnail" 
+                className="w-full max-w-xs h-auto rounded-lg"
+                onError={() => setThumbnailUrl('')}
+              />
+            </div>
+          )}
           
           <div>
             <label className="block text-sm font-medium mb-2">
@@ -444,7 +564,7 @@ function SeriesModal({
               type="text"
               value={includePatterns}
               onChange={(e) => setIncludePatterns(e.target.value)}
-              placeholder="＃, #, 第"
+              defaultValue="＃, #, 第"
               className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-blue-500"
             />
             <p className="text-xs text-gray-400 mt-1">
@@ -461,7 +581,7 @@ function SeriesModal({
               type="text"
               value={excludePatterns}
               onChange={(e) => setExcludePatterns(e.target.value)}
-              placeholder="予告, ダイジェスト, 解説放送版, インタビュー"
+              defaultValue="予告, ダイジェスト, 解説放送版, インタビュー"
               className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:border-blue-500"
             />
             <p className="text-xs text-gray-400 mt-1">
