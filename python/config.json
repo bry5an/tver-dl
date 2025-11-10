@@ -78,7 +78,7 @@
       "exclude_patterns": []
     }
   ],
-  "download_path": "~/Video",
+  "download_path": "$HOME/Video",
   "archive_file": "downloaded.txt",
   "debug": false,
   "yt_dlp_options": [

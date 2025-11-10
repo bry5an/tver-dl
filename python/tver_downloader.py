@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
 
 # Try to import required packages
 try:
@@ -65,7 +67,13 @@ class TVerDownloader:
             print("Please edit the config file to add your series URLs")
             return default_config
 
-        return json.loads(self.config_path.read_text())
+        config = json.loads(self.config_path.read_text())
+        
+        # Expand environment variables in download_path
+        if "download_path" in config:
+            config["download_path"] = os.path.expandvars(config["download_path"])
+        
+        return config
 
     def check_vpn_connection(self) -> bool:
         """Check if connected to a VPN (trying multiple IP geolocation services)"""
@@ -397,14 +405,28 @@ class TVerDownloader:
                 f"Filtered to {len(episodes_to_download)} episode(s) (excluded {excluded_count})"
             )
 
-        self.logger.info("\nEpisodes to download:")
-        for i, ep in enumerate(episodes_to_download, 1):
+        # Check archive file for already-downloaded episodes
+        archive_path = Path(self.config.get("download_path", "./downloads")) / self.config.get("archive_file", "downloaded.txt")
+        downloaded_urls = set()
+        if archive_path.exists():
+            downloaded_urls = set(archive_path.read_text().splitlines())
+
+        # Split episodes into new vs already downloaded
+        new_episodes = [ep for ep in episodes_to_download if ep["url"] not in downloaded_urls]
+        already_downloaded = [ep for ep in episodes_to_download if ep["url"] in downloaded_urls]
+
+        if not new_episodes:
+            self.logger.info("All matching episodes already downloaded.")
+            return 0
+
+        self.logger.info(f"\nEpisodes to download ({len(new_episodes)} new, {len(already_downloaded)} skipped):")
+        for i, ep in enumerate(new_episodes, 1):
             print(f"  {i}. {ep['title']}")
 
-        # Download episodes (yt-dlp will handle duplicate detection)
-        return self.download_episodes(episodes_to_download, series_name, series)
+        # Download only new ones
+        return self.download_episodes(new_episodes, series_name, series)
 
-    def run(self):
+    def run(self, skip_vpn_check: bool = False, max_workers: int = 3):
         """Main execution method"""
         print("TVer Auto Downloader")
         print("=" * 60)
@@ -413,7 +435,7 @@ class TVerDownloader:
             self.logger.info("DEBUG MODE ENABLED")
 
         # Check VPN
-        if not self.check_vpn_connection():
+        if not skip_vpn_check and not self.check_vpn_connection():
             print("\nExiting...")
             return
 
@@ -425,27 +447,31 @@ class TVerDownloader:
             return
 
         self.logger.info(f"\nProcessing {len(enabled_series)} series...")
+        self.logger.info(f"Using {max_workers} worker(s) for downloads")
 
         total_downloaded = 0
-        for series in enabled_series:
-            try:
-                count = self.process_series(series)
-                total_downloaded += count
-            except Exception as e:
-                self.logger.error(
-                    f"Error processing {series.get('name', 'Unknown')}: {e}", exc_info=self.debug
-                )
-                continue
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(self.process_series, s): s for s in enabled_series}
+            for future in as_completed(futures):
+                series = futures[future]
+                try:
+                    total_downloaded += future.result()
+                except Exception as e:
+                    self.logger.error(f"Error processing {series.get('name')}: {e}", exc_info=self.debug)
 
         # Display download report
-        if self.download_report:
-            print("\nDownload Report")
+        if any(self.download_report.values()):
+            print("\nDownload Summary")
             print("=" * 60)
             for series_name, episodes in self.download_report.items():
-                if episodes:  # Only show series that had downloads
-                    print(f"\n{series_name}:")
-                    for i, episode in enumerate(episodes, 1):
-                        print(f"  {i}. {episode}")
+                if episodes:
+                    print(f"\n{series_name} ({len(episodes)} downloaded):")
+                    for ep in episodes:
+                        print(f"  - {ep}")
+        else:
+            print("\nNo new episodes were downloaded.")
+
 
         print(f"\n{'=' * 60}")
         self.logger.info(f"Complete! Processed {total_downloaded} episode(s)")
@@ -459,11 +485,12 @@ def fetch_episodes_only(series_url: str):
     print(json.dumps(episodes))
 
 def main():
-    
     parser = argparse.ArgumentParser()
     parser.add_argument('--debug', '-d', action='store_true')
     parser.add_argument('--fetch-episodes', help='Fetch episodes for a series URL')
     parser.add_argument('--config', help='Config file path')
+    parser.add_argument('--skip-vpn-check', action='store_true', help='Skip VPN connection check')
+    parser.add_argument('--max-workers', type=int, default=3, help='Maximum number of parallel downloads (default: 3)')
     
     args = parser.parse_args()
     
@@ -475,7 +502,7 @@ def main():
         config_path=args.config if args.config else "config.json",
         debug=args.debug
     )
-    downloader.run()
+    downloader.run(skip_vpn_check=args.skip_vpn_check, max_workers=args.max_workers)
 
 if __name__ == "__main__":
     main()
