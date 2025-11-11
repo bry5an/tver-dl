@@ -4,16 +4,16 @@ TVer Auto Downloader
 Downloads new episodes from TVer series pages using yt-dlp
 """
 
+import argparse
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List
-import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import os
 
 # Try to import required packages
 try:
@@ -68,11 +68,11 @@ class TVerDownloader:
             return default_config
 
         config = json.loads(self.config_path.read_text())
-        
+
         # Expand environment variables in download_path
         if "download_path" in config:
             config["download_path"] = os.path.expandvars(config["download_path"])
-        
+
         return config
 
     def check_vpn_connection(self) -> bool:
@@ -406,7 +406,9 @@ class TVerDownloader:
             )
 
         # Check archive file for already-downloaded episodes
-        archive_path = Path(self.config.get("download_path", "./downloads")) / self.config.get("archive_file", "downloaded.txt")
+        archive_path = Path(self.config.get("download_path", "./downloads")) / self.config.get(
+            "archive_file", "downloaded.txt"
+        )
         downloaded_urls = set()
         if archive_path.exists():
             downloaded_urls = set(archive_path.read_text().splitlines())
@@ -419,7 +421,9 @@ class TVerDownloader:
             self.logger.info("All matching episodes already downloaded.")
             return 0
 
-        self.logger.info(f"\nEpisodes to download ({len(new_episodes)} new, {len(already_downloaded)} skipped):")
+        self.logger.info(
+            f"\nEpisodes to download ({len(new_episodes)} new, {len(already_downloaded)} skipped):"
+        )
         for i, ep in enumerate(new_episodes, 1):
             print(f"  {i}. {ep['title']}")
 
@@ -458,7 +462,9 @@ class TVerDownloader:
                 try:
                     total_downloaded += future.result()
                 except Exception as e:
-                    self.logger.error(f"Error processing {series.get('name')}: {e}", exc_info=self.debug)
+                    self.logger.error(
+                        f"Error processing {series.get('name')}: {e}", exc_info=self.debug
+                    )
 
         # Display download report
         if any(self.download_report.values()):
@@ -472,37 +478,44 @@ class TVerDownloader:
         else:
             print("\nNo new episodes were downloaded.")
 
-
         print(f"\n{'=' * 60}")
         self.logger.info(f"Complete! Processed {total_downloaded} episode(s)")
         print(f"{'=' * 60}")
+
 
 def fetch_episodes_only(series_url: str):
     """Fetch episodes and output as JSON for the app"""
     downloader = TVerDownloader(debug=False)
     episodes = downloader.get_episode_urls(series_url)
     import json
+
     print(json.dumps(episodes))
+
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--debug', '-d', action='store_true')
-    parser.add_argument('--fetch-episodes', help='Fetch episodes for a series URL')
-    parser.add_argument('--config', help='Config file path')
-    parser.add_argument('--skip-vpn-check', action='store_true', help='Skip VPN connection check')
-    parser.add_argument('--max-workers', type=int, default=3, help='Maximum number of parallel downloads (default: 3)')
-    
+    parser.add_argument("--debug", "-d", action="store_true")
+    parser.add_argument("--fetch-episodes", help="Fetch episodes for a series URL")
+    parser.add_argument("--config", help="Config file path")
+    parser.add_argument("--skip-vpn-check", action="store_true", help="Skip VPN connection check")
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=3,
+        help="Maximum number of parallel downloads (default: 3)",
+    )
+
     args = parser.parse_args()
-    
+
     if args.fetch_episodes:
         fetch_episodes_only(args.fetch_episodes)
         return
-    
+
     downloader = TVerDownloader(
-        config_path=args.config if args.config else "config.json",
-        debug=args.debug
+        config_path=args.config if args.config else "config.json", debug=args.debug
     )
     downloader.run(skip_vpn_check=args.skip_vpn_check, max_workers=args.max_workers)
+
 
 if __name__ == "__main__":
     main()
