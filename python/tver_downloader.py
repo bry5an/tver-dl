@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List
@@ -29,6 +30,8 @@ class TVerDownloader:
         self.config_path = Path(config_path)
         self.config = self.load_config()
         self.debug = debug or self.config.get("debug", False)
+        # serialize yt-dlp extractions to avoid concurrency issues
+        self.extract_lock = threading.Lock()
 
         # Setup logging
         log_level = logging.DEBUG if self.debug else logging.INFO
@@ -172,7 +175,9 @@ class TVerDownloader:
 
             self.logger.debug(f"Running command: {' '.join(cmd)}")
 
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            # serialize extraction calls to avoid race conditions / server throttling
+            with self.extract_lock:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
             if result.returncode != 0:
                 self.logger.error(f"yt-dlp extraction failed: {result.stderr}")
@@ -207,7 +212,7 @@ class TVerDownloader:
             return []
 
     def get_episode_urls_api(self, series_url: str) -> List[Dict[str, str]]:
-        """Try to get episodes via TVer's API"""
+        """Try to get episodes via TVer's API (tries multiple endpoints/fallbacks)"""
         try:
             # Extract series ID from URL
             match = re.search(r"/series/([^/]+)", series_url)
@@ -218,49 +223,106 @@ class TVerDownloader:
             series_id = match.group(1)
             self.logger.info(f"Attempting to fetch episodes via API for series: {series_id}")
 
-            # TVer API endpoint
-            api_url = f"https://platform-api.tver.jp/service/api/v1/callSeriesEpisodes/{series_id}"
+            base = "https://platform-api.tver.jp/service/api/v1"
+            endpoints = [
+                f"{base}/callSeriesEpisodes/{series_id}",  # older/expected endpoint
+                f"{base}/callSeries/{series_id}",  # used elsewhere and by some tools
+            ]
 
             headers = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
                 "Origin": "https://tver.jp",
                 "Referer": series_url,
                 "x-tver-platform-type": "web",
+                "Accept": "application/json",
             }
 
-            self.logger.debug(f"API request URL: {api_url}")
-            response = requests.get(api_url, headers=headers, timeout=15)
-            response.raise_for_status()
+            response = None
+            data = None
+            for url in endpoints:
+                try:
+                    self.logger.debug(f"API GET {url}")
+                    response = requests.get(url, headers=headers, timeout=15)
+                    # if we got a 200, use it
+                    if response.status_code == 200:
+                        data = response.json()
+                        break
+                    # some endpoints return 400 to GET but accept POST — try POST as a fallback
+                    if response.status_code == 400:
+                        self.logger.debug(f"GET returned 400 for {url}, trying POST fallback")
+                        try:
+                            response = requests.post(url, headers=headers, timeout=15, json={})
+                            if response.status_code == 200:
+                                data = response.json()
+                                break
+                        except Exception as e_post:
+                            self.logger.debug(f"POST fallback failed for {url}: {e_post}")
+                    # otherwise keep trying other endpoints
+                    self.logger.debug(f"API {url} returned status {response.status_code}")
+                except Exception as e:
+                    self.logger.debug(f"Request to {url} failed: {e}")
+                    continue
 
-            data = response.json()
-            self.logger.debug(f"API response keys: {data.keys()}")
+            if data is None:
+                # nothing succeeded — log response body if present (helpful in debug)
+                if response is not None and self.debug:
+                    self.logger.debug(
+                        f"Final API response ({getattr(response, 'status_code', 'n/a')}): {getattr(response, 'text', '')[:1000]}"
+                    )
+                self.logger.warning("API extraction failed: no usable response from endpoints")
+                return []
 
+            # Normalize and parse episode list from different possible response shapes
             episodes = []
-            # TVer API can have different structures - try multiple paths
-            if "result" in data and "contents" in data["result"]:
-                episode_list = data["result"]["contents"]
-            elif "episodes" in data:
-                episode_list = data["episodes"]
+            episode_list = []
+            if isinstance(data, dict):
+                if "result" in data and isinstance(data["result"], dict):
+                    # many callSeries responses include result.contents
+                    if "contents" in data["result"]:
+                        episode_list = data["result"]["contents"]
+                    else:
+                        # some variations: result may contain episodes or nested structures
+                        for v in ("episodes", "contents", "items"):
+                            if v in data["result"]:
+                                episode_list = data["result"][v]
+                                break
+                elif "episodes" in data:
+                    episode_list = data["episodes"]
+                elif "contents" in data:
+                    episode_list = data["contents"]
+                else:
+                    # fallback: if dict contains lists, try to find the biggest list (heuristic)
+                    lists = [v for v in data.values() if isinstance(v, list)]
+                    if lists:
+                        episode_list = max(lists, key=len)
             elif isinstance(data, list):
                 episode_list = data
-            else:
-                self.logger.debug(f"Unexpected API response structure. Keys: {data.keys()}")
-                episode_list = []
+
+            if not episode_list:
+                if self.debug:
+                    self.logger.debug(
+                        f"Could not find episode list in API response. Raw: {json.dumps(data, ensure_ascii=False)[:1000]}"
+                    )
+                self.logger.warning("API returned data but couldn't parse episodes")
+                return []
 
             for ep in episode_list:
-                # Try different ways to get episode ID and title
-                episode_id = ep.get("id") or ep.get("episodeID") or ep.get("content", {}).get("id")
+                # try a few possible fields
+                episode_id = (
+                    ep.get("id")
+                    or ep.get("episodeID")
+                    or (ep.get("content") or {}).get("id")
+                    or (ep.get("program") or {}).get("id")
+                )
                 title = (
                     ep.get("title")
                     or ep.get("episodeTitle")
-                    or ep.get("content", {}).get("title")
+                    or (ep.get("content") or {}).get("title")
                     or ep.get("broadcastDateLabel", "")
                 )
 
                 if episode_id:
                     episode_url = f"https://tver.jp/episodes/{episode_id}"
-
-                    # Some series might have series name in title already, clean it if needed
                     if title:
                         episodes.append({"url": episode_url, "title": title, "id": episode_id})
                         self.logger.debug(f"Found episode via API: {title} - {episode_url}")
@@ -268,11 +330,7 @@ class TVerDownloader:
             if episodes:
                 self.logger.info(f"API found {len(episodes)} episode(s)")
             else:
-                self.logger.warning("API returned data but couldn't parse episodes")
-                if self.debug:
-                    self.logger.debug(
-                        f"API response: {json.dumps(data, indent=2, ensure_ascii=False)[:500]}"
-                    )
+                self.logger.warning("API returned structure but no episodes were parsed")
 
             return episodes
 
@@ -284,14 +342,14 @@ class TVerDownloader:
         """Get episode URLs using multiple methods"""
         episodes = []
 
-        # Try method 1: TVer API (faster)
-        self.logger.info("Method 1: Trying TVer API...")
-        episodes = self.get_episode_urls_api(series_url)
+        # Try method 1: yt-dlp (preferred)
+        self.logger.info("Method 1: Trying yt-dlp extraction (this may take a minute)...")
+        episodes = self.get_episode_urls_ytdlp(series_url)
 
-        # Try method 2: yt-dlp if API fails (slower but more reliable)
+        # Try method 2: TVer API if yt-dlp fails (slower but more reliable)
         if not episodes:
-            self.logger.info("Method 2: Trying yt-dlp extraction (this may take a minute)...")
-            episodes = self.get_episode_urls_ytdlp(series_url)
+            self.logger.info("Method 2: Trying TVer API...")
+            episodes = self.get_episode_urls_api(series_url)
 
         # Remove duplicates based on URL
         seen_urls = set()
@@ -345,21 +403,31 @@ class TVerDownloader:
 
             # Initialize series in report if not exists
             if series_name not in self.download_report:
-                self.download_report[series_name] = []
+                self.download_report[series_name] = {
+                    "success": [],
+                    "missing_subtitles": [],
+                }
 
             result = subprocess.run(cmd, capture_output=True, text=True)
 
             if result.returncode == 0:
                 # Parse yt-dlp output to find successfully downloaded episodes
+                downloaded_files = []
                 for line in result.stdout.splitlines():
                     if "[download] Destination:" in line:
-                        episode_title = line.split("Destination: ")[-1].split("/")[-1]
-                        self.download_report[series_name].append(episode_title)
+                        file_path = line.split("Destination: ")[-1].strip()
+                        downloaded_files.append(file_path)
+                        episode_title = Path(file_path).stem
+                        self.download_report[series_name]["success"].append(episode_title)
+
+                # Check for missing subtitles
+                self._check_missing_subtitles(download_path, series_name, episodes)
 
                 self.logger.info("✓ Download process completed")
                 return len(episodes)
             else:
                 self.logger.error("✗ Download process had errors")
+                self.logger.error(f"Error output: {result.stderr}")
                 return 0
 
         except FileNotFoundError:
@@ -369,6 +437,29 @@ class TVerDownloader:
         except Exception as e:
             self.logger.error(f"✗ Download error: {e}", exc_info=self.debug)
             return 0
+
+    def _check_missing_subtitles(
+        self, download_path: str, series_name: str, episodes: List[Dict[str, str]]
+    ) -> None:
+        """Check if subtitle files exist for downloaded episodes"""
+        download_dir = Path(download_path)
+
+        for episode in episodes:
+            title = episode["title"]
+            # Look for .vtt, .srt, or .ass subtitle files
+            subtitle_patterns = [f"{title}*.vtt", f"{title}*.srt", f"{title}*.ass"]
+
+            found_subtitle = False
+            for pattern in subtitle_patterns:
+                matching_files = list(download_dir.glob(f"**/{pattern}"))
+                if matching_files:
+                    found_subtitle = True
+                    self.logger.debug(f"Found subtitle for '{title}': {matching_files[0]}")
+                    break
+
+            if not found_subtitle:
+                self.logger.warning(f"Missing subtitle for: {title}")
+                self.download_report[series_name]["missing_subtitles"].append(title)
 
     def process_series(self, series: Dict) -> int:
         """Process a single series and download new episodes"""
@@ -467,14 +558,23 @@ class TVerDownloader:
                     )
 
         # Display download report
-        if any(self.download_report.values()):
+        has_downloads = any(self.download_report[s].get("success") for s in self.download_report)
+        if has_downloads:
             print("\nDownload Summary")
             print("=" * 60)
-            for series_name, episodes in self.download_report.items():
-                if episodes:
-                    print(f"\n{series_name} ({len(episodes)} downloaded):")
-                    for ep in episodes:
-                        print(f"  - {ep}")
+            for series_name, report in self.download_report.items():
+                success_count = len(report.get("success", []))
+                missing_count = len(report.get("missing_subtitles", []))
+
+                if success_count > 0:
+                    print(f"\n{series_name} ({success_count} downloaded):")
+                    for ep in report.get("success", []):
+                        print(f"  ✓ {ep}")
+
+                    if missing_count > 0:
+                        print(f"  ⚠ Missing subtitles ({missing_count}):")
+                        for ep in report.get("missing_subtitles", []):
+                            print(f"    - {ep}")
         else:
             print("\nNo new episodes were downloaded.")
 
@@ -487,7 +587,6 @@ def fetch_episodes_only(series_url: str):
     """Fetch episodes and output as JSON for the app"""
     downloader = TVerDownloader(debug=False)
     episodes = downloader.get_episode_urls(series_url)
-    import json
 
     print(json.dumps(episodes))
 
