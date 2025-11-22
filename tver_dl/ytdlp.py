@@ -60,7 +60,7 @@ class YtDlpHandler:
             self.logger.error(f"Error extracting episodes: {e}", exc_info=self.debug)
             return []
 
-    def download(self, episodes: List[Dict[str, str]], series_name: str) -> int:
+    def download(self, episodes: List[Dict[str, str]], series_name: str, progress_callback=None) -> int:
         """Download episodes using yt-dlp."""
         if not episodes:
             return 0
@@ -84,14 +84,35 @@ class YtDlpHandler:
             if series_name not in self.download_report:
                 self.download_report[series_name] = {"success": [], "missing_subtitles": []}
 
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            # We can't easily get per-file progress from a single yt-dlp batch command without parsing stdout in real-time.
+            # For now, we will run the command and update progress based on the number of files.
+            # Ideally, we would run yt-dlp per file or parse stdout line-by-line.
+            # Let's parse stdout line-by-line to update progress.
+            
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True)
+            
+            stdout_lines = []
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+                if line:
+                    stdout_lines.append(line)
+                    # Detect download completion of a file
+                    if "[download] Destination:" in line or "has already been downloaded" in line:
+                        if progress_callback:
+                            progress_callback(advance=1)
+            
+            stdout, stderr = process.communicate() # Get remaining output
+            # Combine captured lines with any remaining
+            full_stdout = "".join(stdout_lines) + (stdout or "")
 
-            if result.returncode == 0:
-                self._process_download_results(result.stdout, download_path, series_name, episodes)
+            if process.returncode == 0:
+                self._process_download_results(full_stdout, download_path, series_name, episodes)
                 self.logger.info("✓ Download process completed")
                 return len(episodes)
             else:
-                self.logger.error(f"✗ Download failed: {result.stderr}")
+                self.logger.error(f"✗ Download failed: {stderr}")
                 return 0
 
         except Exception as e:

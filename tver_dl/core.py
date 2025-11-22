@@ -7,6 +7,7 @@ from .config import ConfigManager
 from .vpn import VPNChecker
 from .filter import EpisodeFilter
 from .ytdlp import YtDlpHandler
+from .display import DisplayManager
 
 class TVerDownloader:
     """Main application controller."""
@@ -15,7 +16,7 @@ class TVerDownloader:
         self.debug = debug
         self.subtitles_only = subtitles_only
         
-        # Setup logging
+        # Setup logging (still used for debug/file logs if needed, but we rely on display for CLI)
         logging.basicConfig(
             level=logging.DEBUG if debug else logging.INFO,
             format="%(asctime)s - %(levelname)s - %(message)s",
@@ -34,6 +35,7 @@ class TVerDownloader:
         self.vpn_checker = VPNChecker(self.logger)
         self.filter = EpisodeFilter(self.logger)
         self.ytdlp = YtDlpHandler(self.config, self.logger, self.debug, self.subtitles_only)
+        self.display = DisplayManager()
 
     def run(self, skip_vpn_check: bool = False, max_workers: int = 3):
         """Execute the main download workflow."""
@@ -52,14 +54,17 @@ class TVerDownloader:
         self.logger.info(f"Processing {len(enabled_series)} series with {max_workers} workers...")
         
         total_downloaded = 0
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(self._process_series, s): s for s in enabled_series}
-            for future in as_completed(futures):
-                try:
-                    total_downloaded += future.result()
-                except Exception as e:
-                    series_name = futures[future].get('name', 'Unknown')
-                    self.logger.error(f"Error processing {series_name}: {e}", exc_info=self.debug)
+        
+        # Start the rich progress display
+        with self.display.start():
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(self._process_series, s): s for s in enabled_series}
+                for future in as_completed(futures):
+                    try:
+                        total_downloaded += future.result()
+                    except Exception as e:
+                        series_name = futures[future].get('name', 'Unknown')
+                        self.display.log(f"Error processing {series_name}: {e}", style="bold red")
 
         self._print_summary()
         print(f"\n{'=' * 60}")
@@ -71,11 +76,15 @@ class TVerDownloader:
         series_name = series["name"]
         series_url = series["url"]
 
-        print(f"\n{'=' * 60}\nProcessing: {series_name}\n{'=' * 60}")
+        # Create a task for this series
+        task_id = self.display.add_series_task(series_name)
+        self.display.start_task(task_id)
 
         # 1. Extract
+        self.display.update_status(task_id, "Extracting...")
         all_episodes = self.ytdlp.extract_episodes(series_url)
         if not all_episodes:
+            self.display.update_status(task_id, "[red]No episodes found")
             return 0
 
         # 2. Filter
@@ -85,18 +94,28 @@ class TVerDownloader:
         ]
 
         if not episodes_to_download:
-            self.logger.info("No episodes match filter criteria.")
+            self.display.update_status(task_id, "[yellow]Filtered out")
             return 0
 
         # 3. Check Archive (deduplicate)
         new_episodes = self._filter_archived(episodes_to_download)
         if not new_episodes:
-            self.logger.info("All matching episodes already downloaded.")
+            self.display.update_status(task_id, "[green]Up to date")
+            self.display.update_progress(task_id, total=1, advance=1) # Mark done
             return 0
 
         # 4. Download
-        self.logger.info(f"Downloading {len(new_episodes)} new episode(s)...")
-        return self.ytdlp.download(new_episodes, series_name)
+        self.display.update_status(task_id, f"Downloading {len(new_episodes)} eps...")
+        self.display.update_progress(task_id, total=len(new_episodes))
+        
+        # Pass display callback to ytdlp
+        def progress_callback(advance=1):
+            self.display.update_progress(task_id, advance=advance)
+
+        count = self.ytdlp.download(new_episodes, series_name, progress_callback)
+        
+        self.display.update_status(task_id, "[green]Done")
+        return count
 
     def _filter_archived(self, episodes: List[Dict]) -> List[Dict]:
         """Filter out episodes that are already in the download archive."""
