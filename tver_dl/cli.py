@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
+from importlib.metadata import version, PackageNotFoundError
 
 from .core import TVerDownloader
 from .ytdlp import YtDlpHandler
@@ -16,7 +17,13 @@ def fetch_episodes_only(series_url: str):
 
 
 def main():
+    try:
+        __version__ = version("tver-downloader")
+    except PackageNotFoundError:
+        __version__ = "unknown"
+
     parser = argparse.ArgumentParser()
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--debug", "-d", action="store_true")
     parser.add_argument("--fetch-episodes", help="Fetch episodes for a series URL")
     parser.add_argument("--config", help="Config file path")

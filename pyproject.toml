@@ -1,6 +1,6 @@
 [project]
 name = "tver-downloader"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Automatically download new episodes from TVer using yt-dlp"
 requires-python = ">=3.10"
 dependencies = [
@@ -9,6 +9,7 @@ dependencies = [
     "lxml>=4.9",
     "pre-commit>=4.3.0",
     "pyyaml>=6.0.3",
+    "rich>=13.0",
 ]
 
 [project.optional-dependencies]
@@ -29,11 +30,17 @@ ignore = [
 [project.scripts]
 tver-dl = "tver_dl.cli:main"
 
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "tver_dl/_version.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["tver_dl"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
