@@ -536,6 +536,7 @@ dependencies = [
     { name = "beautifulsoup4" },
     { name = "lxml" },
     { name = "pre-commit" },
+    { name = "pyyaml" },
     { name = "requests" },
 ]
 
@@ -555,12 +556,13 @@ requires-dist = [
     { name = "lxml", specifier = ">=4.9" },
     { name = "pre-commit", specifier = ">=4.3.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.3" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "requests", specifier = ">=2.31" },
 ]
 provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.0.1" }]
+dev = [{ name = "pytest", specifier = ">=9.0" }]
 
 [[package]]
 name = "typing-extensions"

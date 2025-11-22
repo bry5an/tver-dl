@@ -10,26 +10,21 @@ import logging
 import os
 import re
 import subprocess
-import sys
+# import sys
 import threading
+import requests
+import yaml
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List
 
-# Try to import required packages
-try:
-    import requests
-except ImportError:
-    print("Installing required packages with uv...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "requests"], check=True)
-    import requests
-
-
 class TVerDownloader:
-    def __init__(self, config_path: str = "config.json", debug: bool = False):
+    def __init__(self, config_path: str = "config.json", debug: bool = False, subtitles_only: bool = False):
         self.config_path = Path(config_path)
         self.config = self.load_config()
         self.debug = debug or self.config.get("debug", False)
+        # If true, only download subtitle files for episodes missing subtitles
+        self.subtitles_only = subtitles_only or self.config.get("subtitles_only", False)
         # serialize yt-dlp extractions to avoid concurrency issues
         self.extract_lock = threading.Lock()
 
@@ -60,17 +55,15 @@ class TVerDownloader:
                 "yt_dlp_options": [
                     "-o",
                     "%(series)s/%(title)s.%(ext)s",
-                    "--write-sub",
-                    "--sub-lang",
-                    "ja",
+                    "--write-subs"
                 ],
             }
-            self.config_path.write_text(json.dumps(default_config, indent=2, ensure_ascii=False))
+            self.config_path.write_text(yaml.dump(default_config, allow_unicode=True, default_flow_style=False))
             print(f"Created default config at {self.config_path}")
             print("Please edit the config file to add your series URLs")
             return default_config
 
-        config = json.loads(self.config_path.read_text())
+        config = yaml.safe_load(self.config_path.read_text())
 
         # Expand environment variables in download_path
         if "download_path" in config:
@@ -211,145 +204,144 @@ class TVerDownloader:
             self.logger.error(f"Error extracting episodes with yt-dlp: {e}", exc_info=self.debug)
             return []
 
-    def get_episode_urls_api(self, series_url: str) -> List[Dict[str, str]]:
-        """Try to get episodes via TVer's API (tries multiple endpoints/fallbacks)"""
-        try:
-            # Extract series ID from URL
-            match = re.search(r"/series/([^/]+)", series_url)
-            if not match:
-                self.logger.warning("Could not extract series ID from URL")
-                return []
+    # def get_episode_urls_api(self, series_url: str) -> List[Dict[str, str]]:
+    #     """Try to get episodes via TVer's API (tries multiple endpoints/fallbacks)"""
+    #     try:
+    #         # Extract series ID from URL
+    #         match = re.search(r"/series/([^/]+)", series_url)
+    #         if not match:
+    #             self.logger.warning("Could not extract series ID from URL")
+    #             return []
 
-            series_id = match.group(1)
-            self.logger.info(f"Attempting to fetch episodes via API for series: {series_id}")
+    #         series_id = match.group(1)
+    #         self.logger.info(f"Attempting to fetch episodes via API for series: {series_id}")
 
-            base = "https://platform-api.tver.jp/service/api/v1"
-            endpoints = [
-                f"{base}/callSeriesEpisodes/{series_id}",  # older/expected endpoint
-                f"{base}/callSeries/{series_id}",  # used elsewhere and by some tools
-            ]
+    #         base = "https://platform-api.tver.jp/service/api/v1"
+    #         endpoints = [
+    #             f"{base}/callSeriesEpisodes/{series_id}",  # older/expected endpoint
+    #             f"{base}/callSeries/{series_id}",  # used elsewhere and by some tools
+    #         ]
 
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-                "Origin": "https://tver.jp",
-                "Referer": series_url,
-                "x-tver-platform-type": "web",
-                "Accept": "application/json",
-            }
+    #         headers = {
+    #             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    #             "Origin": "https://tver.jp",
+    #             "Referer": series_url,
+    #             "x-tver-platform-type": "web",
+    #             "Accept": "application/json",
+    #         }
 
-            response = None
-            data = None
-            for url in endpoints:
-                try:
-                    self.logger.debug(f"API GET {url}")
-                    response = requests.get(url, headers=headers, timeout=15)
-                    # if we got a 200, use it
-                    if response.status_code == 200:
-                        data = response.json()
-                        break
-                    # some endpoints return 400 to GET but accept POST — try POST as a fallback
-                    if response.status_code == 400:
-                        self.logger.debug(f"GET returned 400 for {url}, trying POST fallback")
-                        try:
-                            response = requests.post(url, headers=headers, timeout=15, json={})
-                            if response.status_code == 200:
-                                data = response.json()
-                                break
-                        except Exception as e_post:
-                            self.logger.debug(f"POST fallback failed for {url}: {e_post}")
-                    # otherwise keep trying other endpoints
-                    self.logger.debug(f"API {url} returned status {response.status_code}")
-                except Exception as e:
-                    self.logger.debug(f"Request to {url} failed: {e}")
-                    continue
+    #         response = None
+    #         data = None
+    #         for url in endpoints:
+    #             try:
+    #                 self.logger.debug(f"API GET {url}")
+    #                 response = requests.get(url, headers=headers, timeout=15)
+    #                 # if we got a 200, use it
+    #                 if response.status_code == 200:
+    #                     data = response.json()
+    #                     break
+    #                 # some endpoints return 400 to GET but accept POST — try POST as a fallback
+    #                 if response.status_code == 400:
+    #                     self.logger.debug(f"GET returned 400 for {url}, trying POST fallback")
+    #                     try:
+    #                         response = requests.post(url, headers=headers, timeout=15, json={})
+    #                         if response.status_code == 200:
+    #                             data = response.json()
+    #                             break
+    #                     except Exception as e_post:
+    #                         self.logger.debug(f"POST fallback failed for {url}: {e_post}")
+    #                 # otherwise keep trying other endpoints
+    #                 self.logger.debug(f"API {url} returned status {response.status_code}")
+    #             except Exception as e:
+    #                 self.logger.debug(f"Request to {url} failed: {e}")
+    #                 continue
 
-            if data is None:
-                # nothing succeeded — log response body if present (helpful in debug)
-                if response is not None and self.debug:
-                    self.logger.debug(
-                        f"Final API response ({getattr(response, 'status_code', 'n/a')}): {getattr(response, 'text', '')[:1000]}"
-                    )
-                self.logger.warning("API extraction failed: no usable response from endpoints")
-                return []
+    #         if data is None:
+    #             # nothing succeeded — log response body if present (helpful in debug)
+    #             if response is not None and self.debug:
+    #                 self.logger.debug(
+    #                     f"Final API response ({getattr(response, 'status_code', 'n/a')}): {getattr(response, 'text', '')[:1000]}"
+    #                 )
+    #             self.logger.warning("API extraction failed: no usable response from endpoints")
+    #             return []
 
-            # Normalize and parse episode list from different possible response shapes
-            episodes = []
-            episode_list = []
-            if isinstance(data, dict):
-                if "result" in data and isinstance(data["result"], dict):
-                    # many callSeries responses include result.contents
-                    if "contents" in data["result"]:
-                        episode_list = data["result"]["contents"]
-                    else:
-                        # some variations: result may contain episodes or nested structures
-                        for v in ("episodes", "contents", "items"):
-                            if v in data["result"]:
-                                episode_list = data["result"][v]
-                                break
-                elif "episodes" in data:
-                    episode_list = data["episodes"]
-                elif "contents" in data:
-                    episode_list = data["contents"]
-                else:
-                    # fallback: if dict contains lists, try to find the biggest list (heuristic)
-                    lists = [v for v in data.values() if isinstance(v, list)]
-                    if lists:
-                        episode_list = max(lists, key=len)
-            elif isinstance(data, list):
-                episode_list = data
+    #         # Normalize and parse episode list from different possible response shapes
+    #         episodes = []
+    #         episode_list = []
+    #         if isinstance(data, dict):
+    #             if "result" in data and isinstance(data["result"], dict):
+    #                 # many callSeries responses include result.contents
+    #                 if "contents" in data["result"]:
+    #                     episode_list = data["result"]["contents"]
+    #                 else:
+    #                     # some variations: result may contain episodes or nested structures
+    #                     for v in ("episodes", "contents", "items"):
+    #                         if v in data["result"]:
+    #                             episode_list = data["result"][v]
+    #                             break
+    #             elif "episodes" in data:
+    #                 episode_list = data["episodes"]
+    #             elif "contents" in data:
+    #                 episode_list = data["contents"]
+    #             else:
+    #                 # fallback: if dict contains lists, try to find the biggest list (heuristic)
+    #                 lists = [v for v in data.values() if isinstance(v, list)]
+    #                 if lists:
+    #                     episode_list = max(lists, key=len)
+    #         elif isinstance(data, list):
+    #             episode_list = data
 
-            if not episode_list:
-                if self.debug:
-                    self.logger.debug(
-                        f"Could not find episode list in API response. Raw: {json.dumps(data, ensure_ascii=False)[:1000]}"
-                    )
-                self.logger.warning("API returned data but couldn't parse episodes")
-                return []
+    #         if not episode_list:
+    #             if self.debug:
+    #                 self.logger.debug(
+    #                     f"Could not find episode list in API response. Raw: {json.dumps(data, ensure_ascii=False)[:1000]}"
+    #                 )
+    #             self.logger.warning("API returned data but couldn't parse episodes")
+    #             return []
 
-            for ep in episode_list:
-                # try a few possible fields
-                episode_id = (
-                    ep.get("id")
-                    or ep.get("episodeID")
-                    or (ep.get("content") or {}).get("id")
-                    or (ep.get("program") or {}).get("id")
-                )
-                title = (
-                    ep.get("title")
-                    or ep.get("episodeTitle")
-                    or (ep.get("content") or {}).get("title")
-                    or ep.get("broadcastDateLabel", "")
-                )
+    #         for ep in episode_list:
+    #             # try a few possible fields
+    #             episode_id = (
+    #                 ep.get("id")
+    #                 or ep.get("episodeID")
+    #                 or (ep.get("content") or {}).get("id")
+    #                 or (ep.get("program") or {}).get("id")
+    #             )
+    #             title = (
+    #                 ep.get("title")
+    #                 or ep.get("episodeTitle")
+    #                 or (ep.get("content") or {}).get("title")
+    #                 or ep.get("broadcastDateLabel", "")
+    #             )
 
-                if episode_id:
-                    episode_url = f"https://tver.jp/episodes/{episode_id}"
-                    if title:
-                        episodes.append({"url": episode_url, "title": title, "id": episode_id})
-                        self.logger.debug(f"Found episode via API: {title} - {episode_url}")
+    #             if episode_id:
+    #                 episode_url = f"https://tver.jp/episodes/{episode_id}"
+    #                 if title:
+    #                     episodes.append({"url": episode_url, "title": title, "id": episode_id})
+    #                     self.logger.debug(f"Found episode via API: {title} - {episode_url}")
 
-            if episodes:
-                self.logger.info(f"API found {len(episodes)} episode(s)")
-            else:
-                self.logger.warning("API returned structure but no episodes were parsed")
+    #         if episodes:
+    #             self.logger.info(f"API found {len(episodes)} episode(s)")
+    #         else:
+    #             self.logger.warning("API returned structure but no episodes were parsed")
 
-            return episodes
+    #         return episodes
 
-        except Exception as e:
-            self.logger.warning(f"API extraction failed: {e}", exc_info=self.debug)
-            return []
+    #     except Exception as e:
+    #         self.logger.warning(f"API extraction failed: {e}", exc_info=self.debug)
+    #         return []
 
     def get_episode_urls(self, series_url: str) -> List[Dict[str, str]]:
         """Get episode URLs using multiple methods"""
         episodes = []
 
-        # Try method 1: yt-dlp (preferred)
         self.logger.info("Method 1: Trying yt-dlp extraction (this may take a minute)...")
         episodes = self.get_episode_urls_ytdlp(series_url)
 
         # Try method 2: TVer API if yt-dlp fails (slower but more reliable)
-        if not episodes:
-            self.logger.info("Method 2: Trying TVer API...")
-            episodes = self.get_episode_urls_api(series_url)
+        # if not episodes:
+        #     self.logger.info("Method 2: Trying TVer API...")
+        #     episodes = self.get_episode_urls_api(series_url)
 
         # Remove duplicates based on URL
         seen_urls = set()
@@ -380,15 +372,65 @@ class TVerDownloader:
             archive_file = self.config.get("archive_file", "downloaded.txt")
             archive_path = Path(download_path) / archive_file
 
-            # Build list of URLs to download
-            episode_urls = [ep["url"] for ep in episodes]
+            # Build list of URLs to download.
+            # If subtitles_only is enabled, only request episodes that are missing subtitle files.
+            episode_urls = []
+            if self.subtitles_only:
+                download_dir = Path(download_path)
+                for ep in episodes:
+                    title = ep["title"]
+                    subtitle_patterns = [f"{title}*.vtt", f"{title}*.srt", f"{title}*.ass"]
+                    found_subtitle = False
+                    for pattern in subtitle_patterns:
+                        if list(download_dir.glob(f"**/{pattern}")):
+                            found_subtitle = True
+                            break
+                    if not found_subtitle:
+                        episode_urls.append(ep["url"])
+                if not episode_urls:
+                    self.logger.info("No missing subtitles detected for the given episodes. Nothing to do.")
+                    return 0
+            else:
+                episode_urls = [ep["url"] for ep in episodes]
 
             # Build yt-dlp command
+            # Start with configured options, but adjust when subtitles_only is requested
+            base_options = list(self.config.get("yt_dlp_options", []))
+
+            if self.subtitles_only:
+                # remove any output template options to avoid creating video files
+                filtered = []
+                skip_next = False
+                for opt in base_options:
+                    if skip_next:
+                        skip_next = False
+                        continue
+                    if opt in ("-o", "--output"):
+                        skip_next = True
+                        continue
+                    filtered.append(opt)
+                base_options = filtered
+
+                # ensure subtitle-only options are present
+                if "--skip-download" not in base_options:
+                    base_options.insert(0, "--skip-download")
+                if "--write-subs" not in base_options:
+                    base_options.append("--write-subs")
+                # normalize --sub-lang to ja
+                if "--sub-lang" in base_options:
+                    # remove existing pair
+                    i = base_options.index("--sub-lang")
+                    # remove flag and its value if present
+                    if i + 1 < len(base_options):
+                        base_options.pop(i)  # remove flag
+                        base_options.pop(i)  # remove value
+                base_options.extend(["--sub-lang", "ja"])
+
             cmd = [
                 "yt-dlp",
                 "--download-archive",
                 str(archive_path),
-                *self.config.get("yt_dlp_options", []),
+                *base_options,
                 "-P",
                 download_path,
                 *episode_urls,
@@ -598,6 +640,11 @@ def main():
     parser.add_argument("--config", help="Config file path")
     parser.add_argument("--skip-vpn-check", action="store_true", help="Skip VPN connection check")
     parser.add_argument(
+        "--subtitles-only",
+        action="store_true",
+        help="Only download missing subtitle files for matching episodes (skip video download)",
+    )
+    parser.add_argument(
         "--max-workers",
         type=int,
         default=3,
@@ -610,8 +657,15 @@ def main():
         fetch_episodes_only(args.fetch_episodes)
         return
 
+    # Default to config.yaml if it exists, otherwise config.json
+    config_path = args.config
+    if not config_path:
+        config_path = "config.yaml" if Path("config.yaml").exists() else "config.json"
+
     downloader = TVerDownloader(
-        config_path=args.config if args.config else "config.json", debug=args.debug
+        config_path=config_path,
+        debug=args.debug,
+        subtitles_only=args.subtitles_only,
     )
     downloader.run(skip_vpn_check=args.skip_vpn_check, max_workers=args.max_workers)
 
