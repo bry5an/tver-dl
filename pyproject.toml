@@ -27,10 +27,10 @@ ignore = [
 ]
 
 [project.scripts]
-tver-dl = "tver_downloader:main"
+tver-dl = "tver_dl.cli:main"
 
 [tool.hatch.build.targets.wheel]
-only-include = ["tver_downloader.py"]
+packages = ["tver_dl"]
 
 [build-system]
 requires = ["hatchling"]
