@@ -60,43 +60,96 @@ class YtDlpHandler:
             self.logger.error(f"Error extracting episodes: {e}", exc_info=self.debug)
             return []
 
-    def download(self, episodes: List[Dict[str, str]], series_name: str) -> int:
-        """Download episodes using yt-dlp."""
+    def download(self, episodes: List[Dict[str, str]], series_name: str, progress_callback=None) -> List[Dict]:
+        """Download episodes using yt-dlp and return details of successful downloads."""
         if not episodes:
-            return 0
+            return []
 
         try:
             download_path = self.config.get("download_path", "./downloads")
             Path(download_path).mkdir(parents=True, exist_ok=True)
             
-            archive_file = self.config.get("archive_file", "downloaded.txt")
-            archive_path = Path(download_path) / archive_file
-
             # Filter for subtitles only if requested
             episode_urls = self._prepare_download_list(episodes, download_path)
             if not episode_urls:
                 self.logger.info("No episodes need downloading (subtitles check passed).")
-                return 0
+                return []
 
-            cmd = self._build_download_command(episode_urls, download_path, archive_path)
+            # Create a lookup map for episodes by ID/URL to easily merge metadata later
+            ep_map = {ep["url"]: ep for ep in episodes}
+
+            # Build command WITHOUT archive file options, but WITH print options for metadata
+            cmd = self._build_download_command(episode_urls, download_path)
             
             self.logger.info(f"Downloading {len(episodes)} episode(s)...")
             if series_name not in self.download_report:
                 self.download_report[series_name] = {"success": [], "missing_subtitles": []}
 
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            # We use --print to output specific metadata after download
+            # Format: ID|EpisodeNumber|Filepath|Title
+            cmd.extend(["--print", "after_move:RESULT:%(id)s|%(episode_number)s|%(filepath)s|%(title)s"])
 
-            if result.returncode == 0:
-                self._process_download_results(result.stdout, download_path, series_name, episodes)
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True)
+            
+            success_results = []
+            stdout_lines = []
+
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+                if line:
+                    stdout_lines.append(line)
+                    stripped_line = line.strip()
+                    
+                    # Check for our custom output
+                    if stripped_line.startswith("RESULT:"):
+                        try:
+                            _, data = stripped_line.split("RESULT:", 1)
+                            vid_id, ep_num, filepath, title = data.split("|", 3)
+                            
+                            # Find matching episode object (yt-dlp might process in any order)
+                            # We'll try to match by ID or title if possible, but we only passed URLs.
+                            # Since we don't have the ID in the input 'episodes' list (it just has url/title from extraction),
+                            # we can infer which one it was or simply treat this as a success record.
+                            # Ideally we match back to the input 'episodes' dict to get the original URL.
+                            
+                            # We can't easily map back ID to input URL without a prior extraction step that gave us IDs.
+                            # In `extract_episodes`, we DO get IDs. So `episodes` list has "id".
+                            
+                            original_ep = next((e for e in episodes if e.get("id") == vid_id), None)
+                            url = original_ep["url"] if original_ep else "unknown"
+                            ep_title = original_ep["title"] if original_ep else title
+
+                            success_results.append({
+                                "series_name": series_name,
+                                "episode_name": ep_title,
+                                "url": url,
+                                "episode_number": ep_num if ep_num != "NA" else None,
+                                "filepath": filepath
+                            })
+                            
+                            if progress_callback:
+                                progress_callback(advance=1)
+
+                        except ValueError:
+                            pass # parsing error
+
+            stdout, stderr = process.communicate()
+            
+            # Additional processing for subtitles if needed (checks existence)
+            self._process_download_results(success_results, download_path, series_name)
+            
+            if process.returncode == 0:
                 self.logger.info("✓ Download process completed")
-                return len(episodes)
+                return success_results
             else:
-                self.logger.error(f"✗ Download failed: {result.stderr}")
-                return 0
+                self.logger.error(f"✗ Download failed: {stderr}")
+                return success_results # Return partial successes
 
         except Exception as e:
             self.logger.error(f"✗ Download error: {e}", exc_info=self.debug)
-            return 0
+            return []
 
     def _prepare_download_list(self, episodes: List[Dict], download_path: str) -> List[str]:
         """Prepare list of URLs, filtering for missing subtitles if needed."""
@@ -110,7 +163,7 @@ class YtDlpHandler:
                 urls.append(ep["url"])
         return urls
 
-    def _build_download_command(self, urls: List[str], download_path: str, archive_path: Path) -> List[str]:
+    def _build_download_command(self, urls: List[str], download_path: str) -> List[str]:
         """Build the yt-dlp command based on configuration."""
         base_options = list(self.config.get("yt_dlp_options", []))
 
@@ -131,7 +184,7 @@ class YtDlpHandler:
 
         cmd = [
             "yt-dlp",
-            "--download-archive", str(archive_path),
+            # No archive file here!
             *base_options,
             "-P", download_path,
             *urls
@@ -142,23 +195,32 @@ class YtDlpHandler:
             
         return cmd
 
-    def _process_download_results(self, stdout: str, download_path: str, series_name: str, episodes: List[Dict]):
-        """Parse output and check for subtitles."""
-        for line in stdout.splitlines():
-            if "[download] Destination:" in line:
-                file_path = line.split("Destination: ")[-1].strip()
-                self.download_report[series_name]["success"].append(Path(file_path).stem)
-
-        # Check for missing subtitles
+    def _process_download_results(self, results: List[Dict], download_path: str, series_name: str):
+        """Check for subtitles and update report."""
         download_dir = Path(download_path)
-        for ep in episodes:
-            if not self._has_subtitle(download_dir, ep["title"]):
-                self.logger.warning(f"Missing subtitle for: {ep['title']}")
-                self.download_report[series_name]["missing_subtitles"].append(ep["title"])
+        
+        for item in results:
+            episode_name = item["episode_name"]
+            # Check if subtitle exists for this episode
+            has_sub = self._has_subtitle(download_dir, episode_name)
+            
+            # Update the result item with subtitle status for history tracking
+            item["subtitles"] = has_sub
+            
+            self.download_report[series_name]["success"].append(episode_name)
+            
+            if not has_sub:
+                self.logger.warning(f"Missing subtitle for: {episode_name}")
+                self.download_report[series_name]["missing_subtitles"].append(episode_name)
 
     def _has_subtitle(self, download_dir: Path, title: str) -> bool:
         """Check if any subtitle file exists for the title."""
+        # Sanitize title for globbing if needed, though usually yt-dlp cleans it.
+        # We'll try to match the title in the filename.
+        # Note: glob might be sensitive to special chars in title.
         for ext in ["vtt", "srt", "ass"]:
-            if list(download_dir.glob(f"**/{title}*.{ext}")):
+            # Escape brackets for glob if they exist in title
+            safe_title = title.replace("[", "[[]").replace("]", "[]]")
+            if list(download_dir.glob(f"**/*{safe_title}*.{ext}")):
                 return True
         return False

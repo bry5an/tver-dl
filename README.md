@@ -18,7 +18,7 @@ Automatically download new episodes from TVer series pages using yt-dlp.
 Clone the repository and install the package:
 
 ```bash
-git clone https://github.com/yourusername/tver-dl.git
+git clone https://github.com/bry5an/tver-dl.git
 cd tver-dl
 pip install .
 ```
