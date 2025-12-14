@@ -84,7 +84,12 @@ class DatabaseTracker(BaseTracker):
             raise ImportError("psycopg2-binary is required for database tracking.")
 
     def _get_connection(self):
-        return psycopg2.connect(self.connection_string)
+        try:
+            return psycopg2.connect(self.connection_string)
+        except Exception as e:
+            if "No route to host" in str(e) and "supabase" in self.connection_string:
+                self.logger.error("Connection failed. If using Supabase, ensure you are using the Connection Pooler URL (IPv4 compliant) or have IPv6 support.")
+            raise e
 
     def has_episode(self, url: str) -> bool:
         try:
@@ -153,7 +158,7 @@ class DatabaseTracker(BaseTracker):
                         )
                         VALUES (%s, 'downloaded', now(), %s, %s, %s)
                         ON CONFLICT (episode_id) DO UPDATE
-                        SET status = 'downloaded', downloaded_at = now(), updated_at = now()
+                        SET status = 'downloaded', downloaded_at = now()
                     """, (episode_id, file_path, file_size, self.hostname))
                     
                 conn.commit()

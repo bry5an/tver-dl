@@ -130,8 +130,12 @@ If you prefer to track downloads in a PostgreSQL database (e.g., Supabase) inste
      type: "database"
      db_connection_string: "postgresql://user:password@hostname:5432/dbname"
      # db_connection_string: "${DATABASE_URL}" # if using environment variables
-     
    ```
+
+   **Supabase Users**:
+   Supabase's direct database connection is IPv6-only (unless you have the IPv4 add-on). If you see `No route to host` errors:
+   1. Use the **Session** mode connection string from the **Connection Pooler** settings (port 5432).
+   2. Or ensure your network supports IPv6.
 
 ## Features
 
