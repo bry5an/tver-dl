@@ -18,7 +18,12 @@ class ConfigManager:
             }
         ],
         "download_path": "./downloads",
-        "archive_file": "downloaded.txt",
+        "archive_file": "downloaded.txt", # Legacy/fallback
+        "history": {
+            "type": "csv",
+            "csv_path": "history.csv",
+            "db_connection_string": "postgresql://user:pass@host:5432/db"
+        },
         "debug": False,
         "yt_dlp_options": [
             "-o",
@@ -61,6 +66,11 @@ class ConfigManager:
         # Expand environment variables in download_path
         if "download_path" in config:
             config["download_path"] = os.path.expandvars(config["download_path"])
+
+        # Expand environment variables in db_connection_string
+        if "history" in config and isinstance(config["history"], dict):
+            if "db_connection_string" in config["history"]:
+                config["history"]["db_connection_string"] = os.path.expandvars(config["history"]["db_connection_string"])
             
         return config
 

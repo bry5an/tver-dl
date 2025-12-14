@@ -54,6 +54,11 @@ You can edit this file to add your series and customize settings.
 ```yaml
 download_path: ./downloads
 archive_file: downloaded.txt
+history:
+  type: csv # or "database"
+  csv_path: history.csv
+  db_connection_string: postgresql://user:pass@host:5432/db
+
 debug: false
 subtitles_only: false
 
@@ -91,7 +96,11 @@ series:
 
 **Global Settings:**
 - `download_path`: Directory to save downloaded files.
-- `archive_file`: Filename for yt-dlp's download archive (tracks downloaded episodes).
+- `archive_file`: (Legacy) Filename for old `yt-dlp` download archive.
+- `history`: Configuration for download tracking.
+    - `type`: `csv` (default) or `database`.
+    - `csv_path`: Filename for CSV history (relative to `download_path`).
+    - `db_connection_string`: PostgreSQL connection URL (required if `type` is `database`).
 - `debug`: Enable verbose logging.
 - `subtitles_only`: If true, skips video download and only fetches subtitles.
 - `yt_dlp_options`: List of additional command-line options passed to yt-dlp.
@@ -103,9 +112,30 @@ series:
 - `include_patterns`: List of strings that must appear in the title to download (empty = include all).
 - `exclude_patterns`: List of strings that if found in the title, skip download.
 
+## Database Tracking Setup
+
+If you prefer to track downloads in a PostgreSQL database (e.g., Supabase) instead of a CSV file:
+
+1. **Create the Database Tables**:
+   Run the SQL scripts located in the `sql/` directory of this repository in your database. Execute them in the following order:
+   - `sql/series_table.sql`
+   - `sql/episodes_table.sql`
+   - `sql/downloads_table.sql`
+
+2. **Configure `config.yaml`**:
+   Update your configuration file to use the `database` history type and provide your connection string.
+
+   ```yaml
+   history:
+     type: "database"
+     db_connection_string: "postgresql://user:password@hostname:5432/dbname"
+     # db_connection_string: "${DATABASE_URL}" # if using environment variables
+     
+   ```
+
 ## Features
 
-- **Dynamic Output**: Live progress table and download bars using `rich`.
+- **Dynamic Output**: Live progress table and download bars using `rich`. # WIP
 - **Parallel Downloads**: Download multiple series/episodes concurrently.
 - **Smart Filtering**: Include/exclude episodes based on title patterns.
 - **Archive Tracking**: Prevents re-downloading already fetched episodes.

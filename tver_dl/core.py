@@ -8,7 +8,12 @@ from .vpn import VPNChecker
 from .filter import EpisodeFilter
 from .ytdlp import YtDlpHandler
 from .display import DisplayManager
-from .history import HistoryManager
+from .config import ConfigManager
+from .vpn import VPNChecker
+from .filter import EpisodeFilter
+from .ytdlp import YtDlpHandler
+from .display import DisplayManager
+from .tracker import CSVTracker, DatabaseTracker
 
 class TVerDownloader:
     """Main application controller."""
@@ -38,10 +43,19 @@ class TVerDownloader:
         self.ytdlp = YtDlpHandler(self.config, self.logger, self.debug, self.subtitles_only)
         self.display = DisplayManager()
         
-        # History Manager
-        download_path = self.config.get("download_path", "./downloads")
-        history_file = Path(download_path) / "history.csv"
-        self.history = HistoryManager(history_file)
+        # History Tracker Initialization
+        history_config = self.config.get("history", {})
+        if history_config.get("type", "csv") == "database":
+            db_url = history_config.get("db_connection_string")
+            if not db_url:
+                raise ValueError("Database connection string missing in config.")
+            self.tracker = DatabaseTracker(db_url, self.logger)
+        else:
+            # Fallback to CSV
+            download_path = self.config.get("download_path", "./downloads")
+            csv_path = history_config.get("csv_path", "history.csv")
+            history_file = Path(download_path) / csv_path
+            self.tracker = CSVTracker(history_file, self.logger)
 
     def run(self, skip_vpn_check: bool = False, max_workers: int = 3):
         """Execute the main download workflow."""
@@ -103,7 +117,7 @@ class TVerDownloader:
             self.display.update_status(task_id, "[yellow]Filtered out")
             return 0
 
-        # 3. Check Archive (deduplicate via HistoryManager)
+        # 3. Check Archive (deduplicate via Tracker)
         new_episodes = self._filter_archived(episodes_to_download)
         if not new_episodes:
             self.display.update_status(task_id, "[green]Up to date")
@@ -120,14 +134,19 @@ class TVerDownloader:
 
         results = self.ytdlp.download(new_episodes, series_name, progress_callback)
         
-        # Update History
+        # Update Tracker
         for item in results:
-            self.history.add_entry(
-                series_name=item["series_name"],
-                episode_name=item["episode_name"],
-                url=item["url"],
-                episode_number=item["episode_number"],
-                subtitles=item["subtitles"]
+            self.tracker.add_download(
+                series_info={"name": item["series_name"], "url": series_url}, 
+                episode_info={
+                    "title": item["episode_name"], 
+                    "url": item["url"], 
+                    "episode_number": item["episode_number"]
+                },
+                download_info={
+                    "filepath": item["filepath"],
+                    "subtitles": item["subtitles"]
+                }
             )
         
         self.display.update_status(task_id, "[green]Done")
@@ -135,7 +154,7 @@ class TVerDownloader:
 
     def _filter_archived(self, episodes: List[Dict]) -> List[Dict]:
         """Filter out episodes that are already in the history."""
-        return [ep for ep in episodes if not self.history.has_episode(ep["url"])]
+        return [ep for ep in episodes if not self.tracker.has_episode(ep["url"])]
 
     def _print_summary(self):
         """Print the final download report."""
