@@ -23,6 +23,11 @@ cd tver-dl
 pip install .
 ```
 
+Or run locally with UV:
+```bash
+uv run .
+```
+
 ## Usage
 
 Run the tool from the command line:

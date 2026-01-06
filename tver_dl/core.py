@@ -14,6 +14,8 @@ from .filter import EpisodeFilter
 from .ytdlp import YtDlpHandler
 from .display import DisplayManager
 from .tracker import CSVTracker, DatabaseTracker
+from .tver_api import TVerClient
+import re
 
 class TVerDownloader:
     """Main application controller."""
@@ -41,6 +43,7 @@ class TVerDownloader:
         self.vpn_checker = VPNChecker(self.logger)
         self.filter = EpisodeFilter(self.logger)
         self.ytdlp = YtDlpHandler(self.config, self.logger, self.debug, self.subtitles_only)
+        self.api = TVerClient(self.logger)
         self.display = DisplayManager()
         
         # History Tracker Initialization
@@ -102,7 +105,17 @@ class TVerDownloader:
 
         # 1. Extract
         self.display.update_status(task_id, "Extracting...")
-        all_episodes = self.ytdlp.extract_episodes(series_url)
+        
+        # Extract series ID from URL
+        match = re.search(r'series/([a-zA-Z0-9]+)', series_url)
+        if not match:
+            self.logger.error(f"Could not parse series ID from URL: {series_url}")
+            self.display.update_status(task_id, "[red]Invalid URL")
+            return 0
+            
+        series_id = match.group(1)
+        all_episodes = self.api.get_series_episodes(series_id)
+        
         if not all_episodes:
             self.display.update_status(task_id, "[red]No episodes found")
             return 0
