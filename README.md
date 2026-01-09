@@ -5,7 +5,7 @@ Automatically download new episodes from TVer series pages using yt-dlp.
 ## Prerequisites
 
 1. **Python 3.10+**
-2. **yt-dlp** - Install via Homebrew or pip:
+2. **yt-dlp** - Install via Homebrew or pip: (to be replaced with streaks api)
    ```bash
    brew install yt-dlp
    # or
