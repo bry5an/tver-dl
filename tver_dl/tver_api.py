@@ -4,6 +4,8 @@ import logging
 import urllib.request
 import urllib.parse
 import urllib.error
+import ssl
+import certifi
 from typing import Dict, List, Optional
 from .utils import traverse_obj
 
@@ -21,7 +23,30 @@ class TVerClient:
         self.logger = logger
         self.platform_uid = None
         self.platform_token = None
+        # Create SSL context using certifi
+        try:
+            self.logger.debug(f"Using certifi CA bundle: {certifi.where()}")
+            self.ssl_context = ssl.create_default_context(cafile=certifi.where())
+        except Exception as e:
+            self.logger.warning(f"Failed to create secure SSL context: {e}. Defaulting to unverified.")
+            self.ssl_context = ssl._create_unverified_context()
+            
         self._initialize_session()
+
+    def _send_request(self, req: urllib.request.Request):
+        """Send request with SSL error handling and retry logic."""
+        try:
+            return urllib.request.urlopen(req, context=self.ssl_context)
+        except urllib.error.URLError as e:
+            # Check if this is an SSL error
+            error_str = str(e.reason)
+            if "CERTIFICATE_VERIFY_FAILED" in error_str:
+                self.logger.warning("SSL verification failed. Falling back to unverified context.")
+                # Switch to unverified context for future requests too
+                self.ssl_context = ssl._create_unverified_context()
+                # Retry immediately
+                return urllib.request.urlopen(req, context=self.ssl_context)
+            raise
 
     def _initialize_session(self):
         """Initialize session to get platform tokens."""
@@ -30,7 +55,7 @@ class TVerClient:
         
         try:
             req = urllib.request.Request(url, data=data, headers=self._HEADERS, method='POST')
-            with urllib.request.urlopen(req) as response:
+            with self._send_request(req) as response:
                 resp_json = json.loads(response.read().decode())
                 
             self.platform_uid = traverse_obj(resp_json, ('result', 'platform_uid'))
@@ -47,7 +72,7 @@ class TVerClient:
     def _call_api(self, url: str, query: Dict = None) -> Dict:
         """Helper to call TVer APIs."""
         try:
-            if query:
+            if query is not None:
                 # Add platform credentials if available and not already present
                 if self.platform_uid and self.platform_token:
                     if 'platform_uid' not in query:
@@ -64,7 +89,7 @@ class TVerClient:
             self.logger.debug(f"Calling API: {url}")
             req = urllib.request.Request(url, headers=self._HEADERS)
             
-            with urllib.request.urlopen(req) as response:
+            with self._send_request(req) as response:
                 return json.loads(response.read().decode())
                 
         except urllib.error.HTTPError as e:
@@ -84,17 +109,8 @@ class TVerClient:
 
         # 1. Get Seasons
         seasons_url = f'https://service-api.tver.jp/api/v1/callSeriesSeasons/{series_id}'
-        # This API does NOT require platform tokens usually, but we'll see.
-        # Based on yt-dlp implementation, it just needs HEADERS.
-        
-        # Note: _call_api automatically adds tokens if query is passed, but here we might not need them.
-        # However, yt-dlp implementation separates _download_json (no tokens by default) and _call_platform_api (adds tokens).
-        # We'll simple call it.
         
         seasons_data = self._call_api(seasons_url)
-        
-        # traverse to find seasons
-        # yt-dlp: ('result', 'contents', lambda _, v: v['type'] == 'season', 'content', 'id')
         
         contents = traverse_obj(seasons_data, ('result', 'contents'), default=[])
         season_ids = []
@@ -107,8 +123,6 @@ class TVerClient:
         
         if not season_ids:
             self.logger.warning(f"No seasons found for series {series_id}. Trying to check if it's a single season/flat series?")
-            # Some series might not have seasons structure? 
-            # But yt-dlp implies this structure is standard for 'series' type.
             return []
 
         self.logger.debug(f"Found {len(season_ids)} seasons.")
@@ -135,9 +149,6 @@ class TVerClient:
                     broadcast_date = content.get('broadcastDateLabel', '')
                     
                     # Construct full title
-                    # content['title'] is usually "Episode X Title" or similar
-                    # Check how yt-dlp constructs it:
-                    # title = join_nonempty(series, episode, delim=' ')
                     full_title = f"{series_title} {title}".strip()
                     
                     ep_obj = {
