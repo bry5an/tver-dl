@@ -2,12 +2,10 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List
+import re
 
-from .config import ConfigManager
-from .vpn import VPNChecker
-from .filter import EpisodeFilter
-from .ytdlp import YtDlpHandler
-from .display import DisplayManager
+from rich.logging import RichHandler
+
 from .config import ConfigManager
 from .vpn import VPNChecker
 from .filter import EpisodeFilter
@@ -15,7 +13,6 @@ from .ytdlp import YtDlpHandler
 from .display import DisplayManager
 from .tracker import CSVTracker, DatabaseTracker
 from .tver_api import TVerClient
-import re
 
 class TVerDownloader:
     """Main application controller."""
@@ -24,11 +21,17 @@ class TVerDownloader:
         self.debug = debug
         self.subtitles_only = subtitles_only
         
-        # Setup logging (still used for debug/file logs if needed, but we rely on display for CLI)
+        # Initialize display first to get the shared console
+        self.display = DisplayManager()
+        
+        # Setup logging to use RichHandler with the shared console
+        # This ensures logs don't break the progress bar display
         logging.basicConfig(
             level=logging.DEBUG if debug else logging.INFO,
-            format="%(asctime)s - %(levelname)s - %(message)s",
-            datefmt="%H:%M:%S"
+            format="%(message)s",
+            datefmt="[%X]",
+            handlers=[RichHandler(console=self.display.console, rich_tracebacks=True, show_path=False)],
+            force=True
         )
         self.logger = logging.getLogger(__name__)
 
@@ -44,7 +47,6 @@ class TVerDownloader:
         self.filter = EpisodeFilter(self.logger)
         self.ytdlp = YtDlpHandler(self.config, self.logger, self.debug, self.subtitles_only)
         self.api = TVerClient(self.logger)
-        self.display = DisplayManager()
         
         # History Tracker Initialization
         history_config = self.config.get("history", {})
