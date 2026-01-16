@@ -99,12 +99,12 @@ class TVerClient:
             self.logger.error(f"Error calling {url}: {e}")
             return {}
 
-    def get_series_episodes(self, series_id: str) -> List[Dict]:
+    def get_series_episodes(self, series_id: str, series_name: str) -> List[Dict]:
         """
         Fetch all available episodes for a series ID.
         Returns a list of dicts with keys: id, title, url, episode_number, etc.
         """
-        self.logger.info(f"Fetching episodes for series ID: {series_id}")
+        self.logger.info(f"Fetching episodes for series: {series_name}")
         episodes = []
 
         # 1. Get Seasons
@@ -122,7 +122,7 @@ class TVerClient:
                     season_ids.append(s_id)
         
         if not season_ids:
-            self.logger.warning(f"No seasons found for series {series_id}. Trying to check if it's a single season/flat series?")
+            self.logger.warning(f"No seasons found for series {series_name}. Trying to check if it's a single season/flat series?")
             return []
 
         self.logger.debug(f"Found {len(season_ids)} seasons.")

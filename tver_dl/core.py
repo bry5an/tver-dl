@@ -116,7 +116,7 @@ class TVerDownloader:
             return 0
             
         series_id = match.group(1)
-        all_episodes = self.api.get_series_episodes(series_id)
+        all_episodes = self.api.get_series_episodes(series_id, series_name)
         
         if not all_episodes:
             self.display.update_status(task_id, "[red]No episodes found")
