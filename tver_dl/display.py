@@ -49,11 +49,13 @@ class DisplayManager:
         """Update the status text of a task."""
         self.progress.update(task_id, status=status)
 
-    def update_progress(self, task_id: Any, advance: int = 0, total: Optional[int] = None, status: Optional[str] = None):
+    def update_progress(self, task_id: Any, advance: int = 0, total: Optional[int] = None, completed: Optional[float] = None, status: Optional[str] = None):
         """Update progress bar and optionally status."""
         kwargs = {"advance": advance}
         if total is not None:
             kwargs["total"] = total
+        if completed is not None:
+            kwargs["completed"] = completed
         if status is not None:
             kwargs["status"] = status
             
