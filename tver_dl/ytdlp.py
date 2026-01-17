@@ -1,8 +1,9 @@
 import logging
 import subprocess
 import threading
+import re
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Callable
 
 class YtDlpHandler:
     """Handles interactions with yt-dlp for extraction and downloading."""
@@ -60,7 +61,7 @@ class YtDlpHandler:
             self.logger.error(f"Error extracting episodes: {e}", exc_info=self.debug)
             return []
 
-    def download(self, episodes: List[Dict[str, str]], series_name: str, progress_callback=None) -> List[Dict]:
+    def download(self, episodes: List[Dict[str, str]], series_name: str, progress_callback: Optional[Callable[[float], None]] = None) -> List[Dict]:
         """Download episodes using yt-dlp and return details of successful downloads."""
         if not episodes:
             return []
@@ -89,10 +90,20 @@ class YtDlpHandler:
             # Format: ID|EpisodeNumber|Filepath|Title
             cmd.extend(["--print", "after_move:RESULT:%(id)s|%(episode_number)s|%(filepath)s|%(title)s"])
 
+            # Enable progress output even if we capture stdout
+            if "--progress" not in cmd:
+                cmd.append("--progress")
+            # Force progress to be strictly on stdout or handled via newline
+            # yt-dlp defaults to carriage return for progress. We want newlines or we handle CR.
+            # Actually, readline() handles \n. yt-dlp progress uses \r.
+            # We can use "--newline" to force newlines for progress, making readline() work for progress too.
+            cmd.append("--newline")
+
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True)
             
             success_results = []
             stdout_lines = []
+            completed_count = 0
 
             while True:
                 line = process.stdout.readline()
@@ -102,20 +113,21 @@ class YtDlpHandler:
                     stdout_lines.append(line)
                     stripped_line = line.strip()
                     
+                    # Check for progress
+                    # [download]  23.5% of 10.00MiB ...
+                    progress_match = re.search(r'\[download\]\s+(\d+\.?\d*)%', stripped_line)
+                    if progress_match and progress_callback:
+                        percent = float(progress_match.group(1))
+                        # Total progress = completed episodes + current partial
+                        total_progress = completed_count + (percent / 100.0)
+                        progress_callback(total_progress)
+                    
                     # Check for our custom output
                     if stripped_line.startswith("RESULT:"):
                         try:
+                            # Parse result
                             _, data = stripped_line.split("RESULT:", 1)
                             vid_id, ep_num, filepath, title = data.split("|", 3)
-                            
-                            # Find matching episode object (yt-dlp might process in any order)
-                            # We'll try to match by ID or title if possible, but we only passed URLs.
-                            # Since we don't have the ID in the input 'episodes' list (it just has url/title from extraction),
-                            # we can infer which one it was or simply treat this as a success record.
-                            # Ideally we match back to the input 'episodes' dict to get the original URL.
-                            
-                            # We can't easily map back ID to input URL without a prior extraction step that gave us IDs.
-                            # In `extract_episodes`, we DO get IDs. So `episodes` list has "id".
                             
                             original_ep = next((e for e in episodes if e.get("id") == vid_id), None)
                             url = original_ep["url"] if original_ep else "unknown"
@@ -129,8 +141,10 @@ class YtDlpHandler:
                                 "filepath": filepath
                             })
                             
+                            # Increment completed count
+                            completed_count += 1
                             if progress_callback:
-                                progress_callback(advance=1)
+                                progress_callback(float(completed_count))
 
                         except ValueError:
                             pass # parsing error

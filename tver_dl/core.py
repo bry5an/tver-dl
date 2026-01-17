@@ -144,8 +144,9 @@ class TVerDownloader:
         self.display.update_progress(task_id, total=len(new_episodes))
         
         # Pass display callback to ytdlp
-        def progress_callback(advance=1):
-            self.display.update_progress(task_id, advance=advance)
+        # Callback receives absolute progress (e.g. 1.5 for 1.5 episodes done)
+        def progress_callback(progress):
+            self.display.update_progress(task_id, completed=progress)
 
         results = self.ytdlp.download(new_episodes, series_name, progress_callback)
         
