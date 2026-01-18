@@ -114,12 +114,14 @@ class TVerClient:
         
         contents = traverse_obj(seasons_data, ('result', 'contents'), default=[])
         season_ids = []
+        season_map = {}
         
         for content in contents:
             if content.get('type') == 'season':
                 s_id = traverse_obj(content, ('content', 'id'))
                 if s_id:
                     season_ids.append(s_id)
+                    season_map[s_id] = traverse_obj(content, ('content', 'title'), default='Unknown')
         
         if not season_ids:
             self.logger.warning(f"No seasons found for series {series_name}. Trying to check if it's a single season/flat series?")
@@ -156,6 +158,7 @@ class TVerClient:
                         'title': full_title, # Using full title for filtering
                         'episode_title': title, # Raw episode title
                         'series_title': series_title,
+                        'season_name': season_map.get(s_id, 'Unknown'),
                         'url': f'https://tver.jp/episodes/{ep_id}',
                         'episode_number': content.get('no'),
                         'broadcast_date': broadcast_date,

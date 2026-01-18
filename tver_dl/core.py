@@ -125,7 +125,7 @@ class TVerDownloader:
         # 2. Filter
         episodes_to_download = [
             ep for ep in all_episodes 
-            if self.filter.should_download(ep["title"], series)
+            if self.filter.should_download(ep, series)
         ]
 
         if not episodes_to_download:
