@@ -165,5 +165,5 @@ class TVerClient:
                     }
                     episodes.append(ep_obj)
 
-        self.logger.info(f"found {len(episodes)} episodes via API.")
+        self.logger.info(f"found {len(episodes)} episodes via API for {series_name}.")
         return episodes
