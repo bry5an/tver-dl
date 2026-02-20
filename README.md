@@ -75,26 +75,33 @@ yt_dlp_options:
   - "ja"
 
 series:
-  - name: "Series with Episode Numbers"
-    url: "https://tver.jp/series/sr..."
-    enabled: true
-    include_patterns:
-      - "＃"
-      - "#"
-      - "第"
-    exclude_patterns:
-      - "予告"
-      - "ダイジェスト"
-      - "解説放送版"
+  dramas:
+    - name: "Series with Episode Numbers"
+      url: "https://tver.jp/series/sr..."
+      # Defaults applied automatically:
+      # enabled: true
+      # target_seasons: ["本編"]
+      # subtitles: true
+      include_patterns:
+        - "＃"
+        - "#"
+        - "第"
+      exclude_patterns:
+        - "予告"
+        - "ダイジェスト"
 
-  - name: "Weekly Variety Show"
-    url: "https://tver.jp/series/sr..."
-    enabled: true
-    include_patterns: []
-    exclude_patterns:
-      - "予告"
-      - "番宣"
-      - "特報"
+  variety_shows:
+    - name: "Weekly Variety Show"
+      url: "https://tver.jp/series/sr..."
+      include_patterns: []
+      exclude_patterns:
+        - "予告"
+        - "番宣"
+
+  kids_shows:
+    - name: "Kids Show without Subtitles"
+      url: "https://tver.jp/series/sr..."
+      subtitles: false # Skips subtitle checking for this series
 ```
 
 ### Configuration Options
@@ -110,10 +117,15 @@ series:
 - `subtitles_only`: If true, skips video download and only fetches subtitles.
 - `yt_dlp_options`: List of additional command-line options passed to yt-dlp.
 
+**Series Categories:**
+You can group series under custom categories (e.g., `dramas`, `variety_shows`). The category name is automatically appended to your global `download_path` for those series.
+
 **Per-Series Settings:**
 - `name`: Friendly name for the series.
 - `url`: The TVer series page URL.
-- `enabled`: Set to `false` to disable downloading for this series.
+- `enabled`: Set to `false` to disable downloading for this series (default: `true`).
+- `subtitles`: Set to `false` to skip subtitle checks when running with `--subtitles-only` (default: `true`).
+- `target_seasons`: List of seasons to target (default: `["本編"]`).
 - `include_patterns`: List of strings that must appear in the title to download (empty = include all).
 - `exclude_patterns`: List of strings that if found in the title, skip download.
 
