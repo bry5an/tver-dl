@@ -128,27 +128,64 @@ class TVerDownloader:
             if self.filter.should_download(ep, series)
         ]
 
-        if not episodes_to_download:
-            self.display.update_status(task_id, "[yellow]Filtered out")
-            return 0
-
         # 3. Check Archive (deduplicate via Tracker)
         new_episodes = self._filter_archived(episodes_to_download)
-        if not new_episodes:
-            self.display.update_status(task_id, "[green]Up to date")
+
+        # 3a. Add Subtitle Retries if needed
+        # If subtitles_only is enabled, we also check DB for episodes that:
+        # - Are already downloaded
+        # - Are from a series known to have subtitles
+        # - Are missing subtitles
+        subtitle_retries = []
+        if self.subtitles_only and isinstance(self.tracker, DatabaseTracker):
+            if series.get("subtitles", True):
+                self.display.update_status(task_id, "Checking missing subs...")
+                missing_subs = self.tracker.get_episodes_needing_subtitles(series_url)
+            
+            for missing in missing_subs:
+                # Need to map back to the full episode object format if possible, or construct enough
+                # We have url, title, episode_number from DB.
+                # We check if it is already in new_episodes to avoid duplicates
+                if not any(e['url'] == missing['url'] for e in new_episodes):
+                    # Reconstruct a minimal episode dict for downloader
+                    # The downloader mainly needs 'url' and 'title'.
+                    subtitle_retries.append({
+                        "url": missing["url"],
+                        "title": missing["title"],
+                        "episode_number": missing.get("episode_number"),
+                        "series_name": series_name # Helper
+                    })
+            
+            if subtitle_retries:
+                self.logger.info(f"Found {len(subtitle_retries)} episodes needing subtitle retry for {series_name}")
+            elif not series.get("subtitles", True):
+                self.logger.debug(f"Skipped subtitle retry check for {series_name} (subtitles disabled)")
+        
+        final_download_list = new_episodes + subtitle_retries
+
+        if not final_download_list:
+            if not episodes_to_download and not subtitle_retries:
+                 self.display.update_status(task_id, "[yellow]Filtered out")
+            else:
+                 self.display.update_status(task_id, "[green]Up to date")
             self.display.update_progress(task_id, total=1, advance=1) # Mark done
             return 0
 
         # 4. Download
-        self.display.update_status(task_id, f"Downloading {len(new_episodes)} eps...")
-        self.display.update_progress(task_id, total=len(new_episodes))
+        self.display.update_status(task_id, f"Downloading {len(final_download_list)} eps...")
+        self.display.update_progress(task_id, total=len(final_download_list))
         
         # Pass display callback to ytdlp
         # Callback receives absolute progress (e.g. 1.5 for 1.5 episodes done)
         def progress_callback(progress):
             self.display.update_progress(task_id, completed=progress)
 
-        results = self.ytdlp.download(new_episodes, series_name, progress_callback)
+        results = self.ytdlp.download(
+            final_download_list, 
+            series_name, 
+            progress_callback,
+            category=series.get("category")
+        )
         
         # Update Tracker
         for item in results:

@@ -63,6 +63,28 @@ class ConfigManager:
             print(f"Error loading config: {e}")
             return self.DEFAULT_CONFIG
 
+        # Parse and normalize series
+        raw_series = config.get("series", [])
+        normalized_series = []
+        
+        if isinstance(raw_series, list):
+            # Legacy format or simple list
+            for s in raw_series:
+                if isinstance(s, dict):
+                    self._apply_series_defaults(s)
+                    normalized_series.append(s)
+        elif isinstance(raw_series, dict):
+            # Categorized format
+            for category_name, series_list in raw_series.items():
+                if isinstance(series_list, list):
+                    for s in series_list:
+                        if isinstance(s, dict):
+                            s["category"] = category_name
+                            self._apply_series_defaults(s)
+                            normalized_series.append(s)
+                            
+        config["series"] = normalized_series
+
         # Expand environment variables in download_path
         if "download_path" in config:
             config["download_path"] = os.path.expandvars(config["download_path"])
@@ -73,6 +95,12 @@ class ConfigManager:
                 config["history"]["db_connection_string"] = os.path.expandvars(config["history"]["db_connection_string"])
             
         return config
+
+    def _apply_series_defaults(self, series: Dict):
+        """Apply default values to a series configuration."""
+        series.setdefault("enabled", True)
+        series.setdefault("target_seasons", ["本編"])
+        series.setdefault("subtitles", True)
 
     def _create_default_config(self):
         """Create a default configuration file."""

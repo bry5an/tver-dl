@@ -61,13 +61,16 @@ class YtDlpHandler:
             self.logger.error(f"Error extracting episodes: {e}", exc_info=self.debug)
             return []
 
-    def download(self, episodes: List[Dict[str, str]], series_name: str, progress_callback: Optional[Callable[[float], None]] = None) -> List[Dict]:
+    def download(self, episodes: List[Dict[str, str]], series_name: str, progress_callback: Optional[Callable[[float], None]] = None, category: Optional[str] = None) -> List[Dict]:
         """Download episodes using yt-dlp and return details of successful downloads."""
         if not episodes:
             return []
 
         try:
             download_path = self.config.get("download_path", "./downloads")
+            if category:
+                download_path = str(Path(download_path) / category)
+
             Path(download_path).mkdir(parents=True, exist_ok=True)
             
             # Filter for subtitles only if requested
@@ -182,19 +185,45 @@ class YtDlpHandler:
         base_options = list(self.config.get("yt_dlp_options", []))
 
         if self.subtitles_only:
-            # Filter out output templates and ensure subtitle options
-            base_options = [opt for opt in base_options if opt not in ("-o", "--output")]
+            # Safely remove -o/--output and its argument
+            new_options = []
+            skip_next = False
+            for i, opt in enumerate(base_options):
+                if skip_next:
+                    skip_next = False
+                    continue
+                if opt in ("-o", "--output"):
+                    skip_next = True
+                    continue
+                new_options.append(opt)
+            base_options = new_options
+
             if "--skip-download" not in base_options:
                 base_options.insert(0, "--skip-download")
             if "--write-subs" not in base_options:
                 base_options.append("--write-subs")
             # Ensure Japanese subs
             if "--sub-lang" in base_options:
-                idx = base_options.index("--sub-lang")
-                if idx + 1 < len(base_options):
+                try:
+                    idx = base_options.index("--sub-lang")
+                    # Remove the flag and its argument
                     base_options.pop(idx)
-                    base_options.pop(idx)
+                    if idx < len(base_options):
+                        base_options.pop(idx)
+                except ValueError:
+                    pass
             base_options.extend(["--sub-lang", "ja"])
+
+            # Explicitly set output template for subtitles to avoid .unknown_video
+            # We use the config's output template if we can find it, otherwise default
+            # But wait, we just removed it. 
+            # If the user has a preferred structure, we should keep it but adapt it?
+            # Actually, yt-dlp might fail to name the subtitle correctly without the video.
+            # Let's enforce a standard template for subtitles-only to match what we expect
+            # or try to extract the user's template.
+            # A safe bet is:
+            base_options.extend(["--convert-subs", "vtt"])
+            base_options.extend(["-o", f"{download_path}/%(series)s/%(title)s"])
 
         cmd = [
             "yt-dlp",
@@ -216,19 +245,24 @@ class YtDlpHandler:
         for item in results:
             episode_name = item["episode_name"]
             # Check if subtitle exists for this episode
-            has_sub = self._has_subtitle(download_dir, episode_name)
+            subtitle_format = self._get_subtitle_format(download_dir, episode_name)
             
             # Update the result item with subtitle status for history tracking
-            item["subtitles"] = has_sub
+            item["subtitles"] = bool(subtitle_format)
+            item["subtitle_format"] = subtitle_format
             
             self.download_report[series_name]["success"].append(episode_name)
             
-            if not has_sub:
+            if not subtitle_format:
                 self.logger.warning(f"Missing subtitle for: {episode_name}")
                 self.download_report[series_name]["missing_subtitles"].append(episode_name)
 
     def _has_subtitle(self, download_dir: Path, title: str) -> bool:
         """Check if any subtitle file exists for the title."""
+        return bool(self._get_subtitle_format(download_dir, title))
+
+    def _get_subtitle_format(self, download_dir: Path, title: str) -> Optional[str]:
+        """Return the extension of the subtitle file if it exists."""
         # Sanitize title for globbing if needed, though usually yt-dlp cleans it.
         # We'll try to match the title in the filename.
         # Note: glob might be sensitive to special chars in title.
@@ -236,5 +270,5 @@ class YtDlpHandler:
             # Escape brackets for glob if they exist in title
             safe_title = title.replace("[", "[[]").replace("]", "[]]")
             if list(download_dir.glob(f"**/*{safe_title}*.{ext}")):
-                return True
-        return False
+                return ext
+        return None
