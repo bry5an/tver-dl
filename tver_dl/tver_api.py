@@ -130,6 +130,7 @@ class TVerClient:
         self.logger.debug(f"Found {len(season_ids)} seasons.")
 
         # 2. Get Episodes for each Season
+        season_counts = {}
         for s_id in season_ids:
             episodes_url = f'https://platform-api.tver.jp/service/api/v1/callSeasonEpisodes/{s_id}'
             # This requires platform tokens
@@ -149,6 +150,7 @@ class TVerClient:
                     title = content.get('title', '')
                     series_title = content.get('seriesTitle', '')
                     broadcast_date = content.get('broadcastDateLabel', '')
+                    season_name = season_map.get(s_id, 'Unknown')
                     
                     # Construct full title
                     full_title = f"{series_title} {title}".strip()
@@ -158,12 +160,15 @@ class TVerClient:
                         'title': full_title, # Using full title for filtering
                         'episode_title': title, # Raw episode title
                         'series_title': series_title,
-                        'season_name': season_map.get(s_id, 'Unknown'),
+                        'season_name': season_name,
                         'url': f'https://tver.jp/episodes/{ep_id}',
                         'episode_number': content.get('no'),
                         'broadcast_date': broadcast_date,
                     }
                     episodes.append(ep_obj)
+                    season_counts[season_name] = season_counts.get(season_name, 0) + 1
 
-        self.logger.info(f"found {len(episodes)} episodes via API for {series_name}.")
+        count_strs = [f"{name}: {count}" for name, count in season_counts.items()]
+        counts_summary = ", ".join(count_strs) if count_strs else "0"
+        self.logger.info(f"Found {len(episodes)} total episodes via API for {series_name} ({counts_summary}).")
         return episodes
