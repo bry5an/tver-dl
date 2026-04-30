@@ -1,0 +1,110 @@
+series:
+
+  Dramas_Spring_2026:
+    - name: 時すでにおスシ!?
+      url: https://tver.jp/series/srp9pxqt0k
+
+    - name: リボーン ～最後のヒーロー～
+      url: https://tver.jp/series/sruwf1bmff
+
+    - name: ＧＩＦＴ
+      url: https://tver.jp/series/sra31nn3et
+
+    - name: 銀河の一票
+      url: https://tver.jp/series/srrkc0o6aw
+
+    - name: サバ缶、宇宙へ行く
+      url: https://tver.jp/series/sr7hq26b6w
+
+    - name: 夫婦別姓刑事
+      url: https://tver.jp/series/sr70fmk4xw
+
+    - name: タツキ先生は甘すぎる！
+      url: https://tver.jp/series/srp8uxgiz9
+
+    - name: ボーダレス～広域移動捜査隊～
+      url: https://tver.jp/series/srskkomxag
+
+    - name: 産まない女はダメですか？ DINKsのトツキトオカ
+      url: https://tver.jp/series/sr94fxxt4d
+
+  Kids_shows:
+    - name: しまじろうのわお！
+      url: https://tver.jp/series/sr2gk1r3w8
+      subtitles: false
+
+    - name: ガチャムク
+      url: https://tver.jp/series/sr9azohyrb
+      subtitles: false
+
+    - name: ちびまる子ちゃん
+      url: https://tver.jp/series/sr6z4bxpf7
+      subtitles: false
+
+    - name: それいけ！アンパンマン
+      url: https://tver.jp/series/sruityj3v1
+      subtitles: false
+
+    - name: GO!GO!アトム
+      url: https://tver.jp/series/sr8c85h8z2
+      subtitles: false
+
+    - name: ドラえもん
+      url: https://tver.jp/series/srtsxzl3si
+      subtitles: false
+
+  Variety_shows:
+    - name: 世界の果てまでイッテQ！
+      url: https://tver.jp/series/sr9gfdf2ex
+      subtitles: false
+      enabled: false
+
+    - name: 月曜から夜ふかし
+      url: https://tver.jp/series/srmwc0hkme
+      subtitles: false
+      enabled: false
+
+    - name: ホンマでっか！？TV
+      url: https://tver.jp/series/srbcuxhq2k
+      enabled: false
+
+    - name: 飯島直子の今夜一杯いっちゃう？
+      url: https://tver.jp/series/srcbdvsuog
+      subtitles: false
+      enabled: false
+
+    - name: 黒谷友香、お庭つくります
+      url: https://tver.jp/series/srtb11zy0a
+      subtitles: false
+      enabled: false
+
+  Documentary:
+    - name: ザ・ノンフィクション
+      url: https://tver.jp/series/sr7vfvos9u
+      enabled: false
+
+    - name: グッと！地球便
+      url: https://tver.jp/series/srza176zgw
+      enabled: false
+
+  Misc_dramas:
+    - name: 架空OL日記
+      url: https://tver.jp/series/srvrcd5arn
+
+    - name: 三笠のキングと、あと数人
+      url: https://tver.jp/series/sr30ca0zjz
+
+    - name: 歌のおにいさん
+      url: https://tver.jp/series/srlwnkvshw
+
+download_path: $HOME/Video
+debug: false
+subtitles_only: false
+history:
+  type: database
+  db_connection_string: ${POSTGRESQL_CONNECTION}
+
+yt_dlp_options:
+  - -o
+  - "%(series)s/%(title)s.%(ext)s"
+  - --write-subs
