@@ -1,166 +1,56 @@
 # TVer Auto Downloader
 
-Automatically download new episodes from TVer series pages using yt-dlp.
+Automatically download new episodes from [TVer](https://tver.jp) series pages using yt-dlp. Requires a Japanese IP (VPN).
 
-## Prerequisites
+## Features
 
-1. **Python 3.10+**
-2. **yt-dlp** - Install via Homebrew or pip: (to be replaced with streaks api)
-   ```bash
-   brew install yt-dlp
-   # or
-   pip install yt-dlp
-   ```
-3. **VPN** - Connect to a Japanese server before running the script (e.g., NordVPN, ProtonVPN).
+- Live progress bars via Rich
+- Parallel series/episode downloads
+- Episode filtering by season, title patterns
+- Download history tracking (CSV or PostgreSQL)
+- Subtitle-only retry mode for missing subtitle files
+- Docker deployment with Gluetun VPN tunnel
 
-## Installation
+## Quick Start
 
-Clone the repository and install the package:
+**Requirements**: Python 3.10+, yt-dlp, VPN with a Japanese exit node
 
 ```bash
-git clone https://github.com/bry5an/tver-dl.git
-cd tver-dl
-pip install .
+pip install git+https://github.com/bry5an/tver-dl.git
+tver-dl  # creates config at ~/.config/tver-dl/config.yaml on first run
 ```
 
-Or run locally with UV:
-```bash
-uv run .
-```
-
-## Usage
-
-Run the tool from the command line:
+Edit the generated config to add your TVer series URLs, then run again:
 
 ```bash
 tver-dl
 ```
 
-### Options
+Or run from source with UV:
 
-- `--version`: Show the version number.
-- `--debug`, `-d`: Enable debug logging.
-- `--config CONFIG`: Specify a custom configuration file path.
-- `--fetch-episodes URL`: Fetch and print episodes for a specific series URL (JSON output).
-- `--skip-vpn-check`: Skip the VPN connection check.
-- `--subtitles-only`: Only download missing subtitle files.
-- `--max-workers N`: Set the maximum number of parallel downloads (default: 3).
-
-## Configuration
-
-The configuration file is automatically created on the first run at:
-- **Linux/macOS**: `~/.config/tver-dl/config.yaml`
-- **Windows**: `%APPDATA%\tver-dl\config.yaml`
-
-You can edit this file to add your series and customize settings.
-
-### Example `config.yaml`
-
-```yaml
-download_path: ./downloads
-archive_file: downloaded.txt
-history:
-  type: csv # or "database"
-  csv_path: history.csv
-  db_connection_string: postgresql://user:pass@host:5432/db
-
-debug: false
-subtitles_only: false
-
-yt_dlp_options:
-  - "-o"
-  - "%(series)s/%(title)s.%(ext)s"
-  - "--write-sub"
-  - "--sub-lang"
-  - "ja"
-
-series:
-  dramas:
-    - name: "Series with Episode Numbers"
-      url: "https://tver.jp/series/sr..."
-      # Defaults applied automatically:
-      # enabled: true
-      # target_seasons: ["本編"]
-      # subtitles: true
-      include_patterns:
-        - "＃"
-        - "#"
-        - "第"
-      exclude_patterns:
-        - "予告"
-        - "ダイジェスト"
-
-  variety_shows:
-    - name: "Weekly Variety Show"
-      url: "https://tver.jp/series/sr..."
-      include_patterns: []
-      exclude_patterns:
-        - "予告"
-        - "番宣"
-
-  kids_shows:
-    - name: "Kids Show without Subtitles"
-      url: "https://tver.jp/series/sr..."
-      subtitles: false # Skips subtitle checking for this series
+```bash
+uv sync
+uv run tver-dl
 ```
 
-### Configuration Options
+## CLI Options
 
-**Global Settings:**
-- `download_path`: Directory to save downloaded files.
-- `archive_file`: (Legacy) Filename for old `yt-dlp` download archive.
-- `history`: Configuration for download tracking.
-    - `type`: `csv` (default) or `database`.
-    - `csv_path`: Filename for CSV history (relative to `download_path`).
-    - `db_connection_string`: PostgreSQL connection URL (required if `type` is `database`).
-- `debug`: Enable verbose logging.
-- `subtitles_only`: If true, skips video download and only fetches subtitles.
-- `yt_dlp_options`: List of additional command-line options passed to yt-dlp.
+| Flag | Description |
+|------|-------------|
+| `--config PATH` | Custom config file path |
+| `--max-workers N` | Parallel download workers (default: 3) |
+| `--subtitles-only` | Retry missing subtitle files without re-downloading video |
+| `--skip-vpn-check` | Skip Japanese IP verification |
+| `--fetch-episodes URL` | Print episode list for a series URL as JSON |
+| `--debug`, `-d` | Enable verbose logging |
 
-**Series Categories:**
-You can group series under custom categories (e.g., `dramas`, `variety_shows`). The category name is automatically appended to your global `download_path` for those series.
+## Documentation
 
-**Per-Series Settings:**
-- `name`: Friendly name for the series.
-- `url`: The TVer series page URL.
-- `enabled`: Set to `false` to disable downloading for this series (default: `true`).
-- `subtitles`: Set to `false` to skip subtitle checks when running with `--subtitles-only` (default: `true`).
-- `target_seasons`: List of seasons to target (default: `["本編"]`).
-- `include_patterns`: List of strings that must appear in the title to download (empty = include all).
-- `exclude_patterns`: List of strings that if found in the title, skip download.
-
-## Database Tracking Setup
-
-If you prefer to track downloads in a PostgreSQL database (e.g., Supabase) instead of a CSV file:
-
-1. **Create the Database Tables**:
-   Run the SQL scripts located in the `sql/` directory of this repository in your database. Execute them in the following order:
-   - `sql/series_table.sql`
-   - `sql/episodes_table.sql`
-   - `sql/downloads_table.sql`
-
-2. **Configure `config.yaml`**:
-   Update your configuration file to use the `database` history type and provide your connection string.
-
-   ```yaml
-   history:
-     type: "database"
-     db_connection_string: "postgresql://user:password@hostname:5432/dbname"
-     # db_connection_string: "${DATABASE_URL}" # if using environment variables
-   ```
-
-   **Supabase Users**:
-   Supabase's direct database connection is IPv6-only (unless you have the IPv4 add-on). If you see `No route to host` errors:
-   1. Use the **Session** mode connection string from the **Connection Pooler** settings (port 5432).
-   2. Or ensure your network supports IPv6.
-
-## Features
-
-- **Dynamic Output**: Live progress table and download bars using `rich`. # WIP
-- **Parallel Downloads**: Download multiple series/episodes concurrently.
-- **Smart Filtering**: Include/exclude episodes based on title patterns.
-- **Archive Tracking**: Prevents re-downloading already fetched episodes.
-- **VPN Check**: Ensures you are connected to a Japanese IP before starting.
+- [Configuration Reference](docs/configuration.md) — all config options and series formats
+- [Deployment Guide](docs/deployment.md) — Docker, VPN, Ansible
+- [Database Setup](docs/database.md) — PostgreSQL/Supabase tracking
+- [Architecture](docs/architecture.md) — system design, data flow, module overview
+- [Contributing](docs/contributing.md) — dev setup, TVer API exploration, testing
 
 ## License
 
