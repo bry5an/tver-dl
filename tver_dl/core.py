@@ -14,40 +14,43 @@ from .display import DisplayManager
 from .tracker import CSVTracker, DatabaseTracker
 from .tver_api import TVerClient
 
+
 class TVerDownloader:
     """Main application controller."""
 
     def __init__(self, config_path: str = None, debug: bool = False, subtitles_only: bool = False):
         self.debug = debug
         self.subtitles_only = subtitles_only
-        
+
         # Initialize display first to get the shared console
         self.display = DisplayManager()
-        
+
         # Setup logging to use RichHandler with the shared console
         # This ensures logs don't break the progress bar display
         logging.basicConfig(
             level=logging.DEBUG if debug else logging.INFO,
             format="%(message)s",
             datefmt="[%X]",
-            handlers=[RichHandler(console=self.display.console, rich_tracebacks=True, show_path=False)],
-            force=True
+            handlers=[
+                RichHandler(console=self.display.console, rich_tracebacks=True, show_path=False)
+            ],
+            force=True,
         )
         self.logger = logging.getLogger(__name__)
 
         # Initialize components
         self.config_manager = ConfigManager(config_path)
         self.config = self.config_manager.load()
-        
+
         # Override debug/subtitles from config if not set in args
         self.debug = self.debug or self.config.get("debug", False)
         self.subtitles_only = self.subtitles_only or self.config.get("subtitles_only", False)
-        
+
         self.vpn_checker = VPNChecker(self.logger)
         self.filter = EpisodeFilter(self.logger)
         self.ytdlp = YtDlpHandler(self.config, self.logger, self.debug, self.subtitles_only)
         self.api = TVerClient(self.logger)
-        
+
         # History Tracker Initialization
         history_config = self.config.get("history", {})
         if history_config.get("type", "csv") == "database":
@@ -77,9 +80,9 @@ class TVerDownloader:
             return
 
         self.logger.info(f"Processing {len(enabled_series)} series with {max_workers} workers...")
-        
+
         total_downloaded = 0
-        
+
         # Start the rich progress display
         with self.display.start():
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -88,7 +91,7 @@ class TVerDownloader:
                     try:
                         total_downloaded += future.result()
                     except Exception as e:
-                        series_name = futures[future].get('name', 'Unknown')
+                        series_name = futures[future].get("name", "Unknown")
                         self.display.log(f"Error processing {series_name}: {e}", style="bold red")
 
         self._print_summary()
@@ -107,25 +110,24 @@ class TVerDownloader:
 
         # 1. Extract
         self.display.update_status(task_id, "Extracting...")
-        
+
         # Extract series ID from URL
-        match = re.search(r'series/([a-zA-Z0-9]+)', series_url)
+        match = re.search(r"series/([a-zA-Z0-9]+)", series_url)
         if not match:
             self.logger.error(f"Could not parse series ID from URL: {series_url}")
             self.display.update_status(task_id, "[red]Invalid URL")
             return 0
-            
+
         series_id = match.group(1)
         all_episodes = self.api.get_series_episodes(series_id, series_name)
-        
+
         if not all_episodes:
             self.display.update_status(task_id, "[red]No episodes found")
             return 0
 
         # 2. Filter
         episodes_to_download = [
-            ep for ep in all_episodes 
-            if self.filter.should_download(ep, series)
+            ep for ep in all_episodes if self.filter.should_download(ep, series)
         ]
 
         # 3. Check Archive (deduplicate via Tracker)
@@ -141,72 +143,75 @@ class TVerDownloader:
             if series.get("subtitles", True):
                 self.display.update_status(task_id, "Checking missing subs...")
                 missing_subs = self.tracker.get_episodes_needing_subtitles(series_url)
-            
+
             for missing in missing_subs:
                 # Need to map back to the full episode object format if possible, or construct enough
                 # We have url, title, episode_number from DB.
                 # We check if it is already in new_episodes to avoid duplicates
-                if not any(e['url'] == missing['url'] for e in new_episodes):
+                if not any(e["url"] == missing["url"] for e in new_episodes):
                     # Reconstruct a minimal episode dict for downloader
                     # The downloader mainly needs 'url' and 'title'.
-                    subtitle_retries.append({
-                        "url": missing["url"],
-                        "title": missing["title"],
-                        "episode_number": missing.get("episode_number"),
-                        "series_name": series_name # Helper
-                    })
-            
+                    subtitle_retries.append(
+                        {
+                            "url": missing["url"],
+                            "title": missing["title"],
+                            "episode_number": missing.get("episode_number"),
+                            "series_name": series_name,  # Helper
+                        }
+                    )
+
             if subtitle_retries:
-                self.logger.info(f"Found {len(subtitle_retries)} episodes needing subtitle retry for {series_name}")
+                self.logger.info(
+                    f"Found {len(subtitle_retries)} episodes needing subtitle retry for {series_name}"
+                )
             elif not series.get("subtitles", True):
-                self.logger.debug(f"Skipped subtitle retry check for {series_name} (subtitles disabled)")
-        
+                self.logger.debug(
+                    f"Skipped subtitle retry check for {series_name} (subtitles disabled)"
+                )
+
         final_download_list = new_episodes + subtitle_retries
 
         if not final_download_list:
             if not episodes_to_download and not subtitle_retries:
-                 self.display.update_status(task_id, "[yellow]Filtered out")
+                self.display.update_status(task_id, "[yellow]Filtered out")
             else:
-                 self.display.update_status(task_id, "[green]Up to date")
-            self.display.update_progress(task_id, total=1, advance=1) # Mark done
+                self.display.update_status(task_id, "[green]Up to date")
+            self.display.update_progress(task_id, total=1, advance=1)  # Mark done
             return 0
 
         # 4. Download
         self.display.update_status(task_id, f"Downloading {len(final_download_list)} eps...")
         self.display.update_progress(task_id, total=len(final_download_list))
-        
+
         # Pass display callback to ytdlp
         # Callback receives absolute progress (e.g. 1.5 for 1.5 episodes done)
         def progress_callback(progress):
             self.display.update_progress(task_id, completed=progress)
 
         results = self.ytdlp.download(
-            final_download_list, 
-            series_name, 
-            progress_callback,
-            category=series.get("category")
+            final_download_list, series_name, progress_callback, category=series.get("category")
         )
-        
+
         # Update Tracker
         for item in results:
             self.tracker.add_download(
-                series_info={"name": item["series_name"], "url": series_url}, 
+                series_info={"name": item["series_name"], "url": series_url},
                 episode_info={
-                    "title": item["episode_name"], 
-                    "url": item["url"], 
-                    "episode_number": item["episode_number"]
+                    "title": item["episode_name"],
+                    "url": item["url"],
+                    "episode_number": item["episode_number"],
                 },
-                download_info={
-                    "filepath": item["filepath"],
-                    "subtitles": item["subtitles"]
-                }
+                download_info={"filepath": item["filepath"], "subtitles": item["subtitles"]},
             )
-        
+
         self.display.update_status(task_id, "[green]Done")
         return len(results)
 
     def _filter_archived(self, episodes: List[Dict]) -> List[Dict]:
         """Filter out episodes that are already in the history."""
+        if hasattr(self.tracker, "has_episodes_batch"):
+            archived = self.tracker.has_episodes_batch([ep["url"] for ep in episodes])
+            return [ep for ep in episodes if ep["url"] not in archived]
         return [ep for ep in episodes if not self.tracker.has_episode(ep["url"])]
 
     def _print_summary(self):
@@ -221,12 +226,12 @@ class TVerDownloader:
         for series_name, data in report.items():
             success = data.get("success", [])
             missing = data.get("missing_subtitles", [])
-            
+
             if success:
                 print(f"\n{series_name} ({len(success)} downloaded):")
                 for title in success:
                     print(f"  ✓ {title}")
-                
+
                 if missing:
                     print(f"  ⚠ Missing subtitles ({len(missing)}):")
                     for title in missing:

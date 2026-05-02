@@ -12,6 +12,7 @@ from rich.table import Table
 from rich.panel import Panel
 from typing import Optional, Dict, Any
 
+
 class DisplayManager:
     """Manages dynamic CLI output using rich."""
 
@@ -36,11 +37,7 @@ class DisplayManager:
     def add_series_task(self, series_name: str, total: int = 0) -> Any:
         """Add a new progress task for a series."""
         task_id = self.progress.add_task(
-            "download", 
-            series_name=series_name, 
-            status="Waiting...", 
-            total=total, 
-            start=False
+            "download", series_name=series_name, status="Waiting...", total=total, start=False
         )
         self.tasks[series_name] = task_id
         return task_id
@@ -49,7 +46,14 @@ class DisplayManager:
         """Update the status text of a task."""
         self.progress.update(task_id, status=status)
 
-    def update_progress(self, task_id: Any, advance: int = 0, total: Optional[int] = None, completed: Optional[float] = None, status: Optional[str] = None):
+    def update_progress(
+        self,
+        task_id: Any,
+        advance: int = 0,
+        total: Optional[int] = None,
+        completed: Optional[float] = None,
+        status: Optional[str] = None,
+    ):
         """Update progress bar and optionally status."""
         kwargs = {"advance": advance}
         if total is not None:
@@ -58,9 +62,9 @@ class DisplayManager:
             kwargs["completed"] = completed
         if status is not None:
             kwargs["status"] = status
-            
+
         self.progress.update(task_id, **kwargs)
-        
+
     def start_task(self, task_id: Any):
         """Start the task (timer)."""
         self.progress.start_task(task_id)

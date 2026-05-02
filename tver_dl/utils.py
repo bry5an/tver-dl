@@ -1,5 +1,5 @@
-
 from typing import Any, Callable, Dict, List, Optional, Union
+
 
 def traverse_obj(
     obj: Any,
@@ -10,7 +10,7 @@ def traverse_obj(
     """
     Safely traverse a nested dictionary/list structure.
     Simplified version of yt-dlp's traverse_obj.
-    
+
     Args:
         obj: The object to traverse.
         *paths: Paths to traverse. Each path is a list/tuple of keys/indices/functions.
@@ -23,7 +23,7 @@ def traverse_obj(
         try:
             if not isinstance(path, (list, tuple)):
                 path = [path]
-            
+
             for key in path:
                 if callable(key):
                     current = key(current)
@@ -36,10 +36,10 @@ def traverse_obj(
                         current = None
                 else:
                     current = None
-                
+
                 if current is None:
                     break
-            
+
             if current is not None:
                 if expected_type:
                     try:
@@ -48,8 +48,8 @@ def traverse_obj(
                         pass
                 else:
                     return current
-                    
+
         except Exception:
             pass
-            
+
     return default

@@ -2,9 +2,10 @@ import logging
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+
 class VPNChecker:
     """Verifies VPN connection to Japan."""
-    
+
     SERVICES = [
         ("https://ipapi.co/json/", lambda r: r.json().get("country_code")),
         ("https://ip.seeip.org/geoip", lambda r: r.json().get("country_code")),
@@ -17,7 +18,7 @@ class VPNChecker:
     def check(self) -> bool:
         """Check if connected to a VPN (trying multiple IP geolocation services in parallel)."""
         self.logger.info("Checking VPN connection...")
-        
+
         connected = False
         details = "Unknown"
 
@@ -33,7 +34,7 @@ class VPNChecker:
 
         with ThreadPoolExecutor(max_workers=len(self.SERVICES)) as executor:
             futures = [executor.submit(check_service, url, parser) for url, parser in self.SERVICES]
-            
+
             for future in as_completed(futures):
                 country, ip = future.result()
                 if country:

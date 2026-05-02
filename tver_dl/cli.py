@@ -7,6 +7,7 @@ from importlib.metadata import version, PackageNotFoundError
 from .core import TVerDownloader
 from .ytdlp import YtDlpHandler
 
+
 def fetch_episodes_only(series_url: str):
     """Fetch episodes and output as JSON (helper for external apps)."""
     # Minimal setup for fetching
@@ -28,8 +29,12 @@ def main():
     parser.add_argument("--fetch-episodes", help="Fetch episodes for a series URL")
     parser.add_argument("--config", help="Config file path")
     parser.add_argument("--skip-vpn-check", action="store_true", help="Skip VPN connection check")
-    parser.add_argument("--subtitles-only", action="store_true", help="Only download missing subtitle files")
-    parser.add_argument("--max-workers", type=int, default=3, help="Maximum number of parallel downloads")
+    parser.add_argument(
+        "--subtitles-only", action="store_true", help="Only download missing subtitle files"
+    )
+    parser.add_argument(
+        "--max-workers", type=int, default=3, help="Maximum number of parallel downloads"
+    )
 
     args = parser.parse_args()
 
@@ -43,6 +48,7 @@ def main():
         subtitles_only=args.subtitles_only,
     )
     downloader.run(skip_vpn_check=args.skip_vpn_check, max_workers=args.max_workers)
+
 
 if __name__ == "__main__":
     main()
