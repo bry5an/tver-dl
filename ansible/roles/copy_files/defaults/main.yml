@@ -1,0 +1,10 @@
+---
+# default variable values for the copy_files role
+sync_directories:
+  - local_base: "/Users/bryan/Video/Variety_shows"
+    remote_base: "/mnt/media/Variety"
+  - local_base: "/Users/bryan/Video/Dramas_Winter_2026"
+    remote_base: "/mnt/media/TV"
+  - local_base: "/Users/bryan/Video/Kids_shows"
+    remote_base: "/mnt/media/Kids_TV"
+  

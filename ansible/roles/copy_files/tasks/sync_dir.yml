@@ -1,0 +1,27 @@
+---
+# tasks to find and copy local subdirectories to matching remote paths
+
+- name: "Find local subdirectories under {{ sync_dir.local_base }}"
+  ansible.builtin.find:
+    paths: "{{ sync_dir.local_base }}"
+    file_type: directory
+    depth: 1
+  delegate_to: localhost
+  run_once: true
+  register: local_dirs
+
+- name: "Copy each local subdirectory to matching remote path"
+  ansible.posix.synchronize:
+    src: "{{ item.path }}/"
+    dest: "{{ sync_dir.remote_base }}/{{ item.path | basename }}/"
+    recursive: yes
+  delegate_to: localhost
+  loop: "{{ local_dirs.files }}"
+
+# - name: "Remove files inside each local subdirectory after successful copy"
+#   shell: |
+#     rm -rf "{{ item.path }}"/* "{{ item.path }}"/.[!.]* "{{ item.path }}"/..?*
+#   args:
+#     warn: false
+#   delegate_to: localhost
+#   loop: "{{ local_dirs.files }}"

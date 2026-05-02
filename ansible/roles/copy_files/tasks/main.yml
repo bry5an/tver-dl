@@ -1,0 +1,6 @@
+---
+# Include the synchronization tasks for each directory mapping
+- include_tasks: sync_dir.yml
+  loop: "{{ sync_directories }}"
+  loop_control:
+    loop_var: sync_dir
