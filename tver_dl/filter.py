@@ -1,7 +1,6 @@
 import logging
 from typing import Dict
 
-
 class EpisodeFilter:
     """Filters episodes based on include/exclude patterns."""
 
@@ -12,7 +11,7 @@ class EpisodeFilter:
         """Check if episode should be downloaded based on series-specific filters."""
         title = episode.get("title", "")
         season_name = episode.get("season_name", "")
-
+        
         include_patterns = series_config.get("include_patterns", [])
         exclude_patterns = series_config.get("exclude_patterns", [])
         target_seasons = series_config.get("target_seasons", [])

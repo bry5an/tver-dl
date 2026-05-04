@@ -7,10 +7,10 @@ dependencies = [
     "requests>=2.31",
     "beautifulsoup4>=4.12",
     "lxml>=4.9",
+    "pre-commit>=4.3.0",
     "pyyaml>=6.0.3",
     "rich>=13.0",
     "psycopg2-binary>=2.9",
-    "yt-dlp>=2024.1",
 ]
 
 [project.optional-dependencies]

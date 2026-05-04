@@ -11,7 +11,6 @@ HEADERS_COMMON = {
     "x-tver-platform-type": "web",
 }
 
-
 def init_session():
     url = "https://platform-api.tver.jp/v2/api/platform_users/browser/create"
     headers = {
@@ -25,15 +24,17 @@ def init_session():
 
     return result["platform_uid"], result["platform_token"]
 
-
 def get_seasons(series_id):
     url = f"https://service-api.tver.jp/api/v1/callSeriesSeasons/{series_id}"
     resp = requests.get(url, headers=HEADERS_COMMON)
     resp.raise_for_status()
 
     contents = resp.json()["result"]["contents"]
-    return [c["content"] for c in contents if c.get("type") == "season"]
-
+    return [
+        c["content"]
+        for c in contents
+        if c.get("type") == "season"
+    ]
 
 def get_episodes(season_id, uid, token):
     url = f"https://platform-api.tver.jp/service/api/v1/callSeasonEpisodes/{season_id}"
@@ -53,17 +54,26 @@ def get_episodes(season_id, uid, token):
     resp.raise_for_status()
     return resp.json()["result"]
 
-
 def main():
-    parser = argparse.ArgumentParser(description="Fetch TVer seasons and episodes")
-    parser.add_argument("series_id", help="Series ID (e.g. sr9gfdf2ex)")
-    parser.add_argument("--season-id", help="Fetch only a specific season ID")
-    parser.add_argument("--season-title", help="Fetch seasons matching this title (e.g. 本編)")
+    parser = argparse.ArgumentParser(
+        description="Fetch TVer seasons and episodes"
+    )
     parser.add_argument(
-        "-o",
-        "--output",
+        "series_id",
+        help="Series ID (e.g. sr9gfdf2ex)"
+    )
+    parser.add_argument(
+        "--season-id",
+        help="Fetch only a specific season ID"
+    )
+    parser.add_argument(
+        "--season-title",
+        help="Fetch seasons matching this title (e.g. 本編)"
+    )
+    parser.add_argument(
+        "-o", "--output",
         default="./json_output/tver_episodes.json",
-        help="Output JSON file (default: tver_episodes.json)",
+        help="Output JSON file (default: tver_episodes.json)"
     )
 
     args = parser.parse_args()
@@ -99,7 +109,6 @@ def main():
         json.dump(output, f, ensure_ascii=False, indent=2)
 
     print(f"✅ Wrote {len(output['seasons'])} season(s) to {args.output}")
-
 
 if __name__ == "__main__":
     main()

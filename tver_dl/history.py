@@ -3,7 +3,6 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-
 class HistoryManager:
     """Manages the download history using a CSV file."""
 
@@ -26,7 +25,7 @@ class HistoryManager:
         """Check if an episode URL is already in the history."""
         if not self.history_file.exists():
             return False
-
+        
         try:
             with open(self.history_file, "r", newline="", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
@@ -35,29 +34,21 @@ class HistoryManager:
                         return True
         except Exception as e:
             self.logger.error(f"Error reading history file: {e}")
-
+        
         return False
 
-    def add_entry(
-        self,
-        series_name: str,
-        episode_name: str,
-        url: str,
-        episode_number: Optional[str],
-        subtitles: bool,
-    ):
+    def add_entry(self, series_name: str, episode_name: str, url: str, 
+                  episode_number: Optional[str], subtitles: bool):
         """Add a new entry to the history."""
         try:
             with open(self.history_file, "a", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=self.FIELDNAMES)
-                writer.writerow(
-                    {
-                        "series_name": series_name,
-                        "episode_name": episode_name,
-                        "url": url,
-                        "episode_number": episode_number or "",
-                        "subtitles": str(subtitles),
-                    }
-                )
+                writer.writerow({
+                    "series_name": series_name,
+                    "episode_name": episode_name,
+                    "url": url,
+                    "episode_number": episode_number or "",
+                    "subtitles": str(subtitles)
+                })
         except Exception as e:
             self.logger.error(f"Error writing to history file: {e}")
