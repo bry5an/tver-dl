@@ -66,7 +66,6 @@ series:
 
     - name: ホンマでっか！？TV
       url: https://tver.jp/series/srbcuxhq2k
-      enabled: false
 
     - name: 飯島直子の今夜一杯いっちゃう？
       url: https://tver.jp/series/srcbdvsuog
@@ -93,9 +92,6 @@ series:
 
     - name: 三笠のキングと、あと数人
       url: https://tver.jp/series/sr30ca0zjz
-
-    - name: 歌のおにいさん
-      url: https://tver.jp/series/srlwnkvshw
 
 download_path: $HOME/Video
 debug: false
