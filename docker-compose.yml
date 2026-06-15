@@ -14,7 +14,9 @@ services:
     restart: unless-stopped
 
   tver-dl:
-    build: .
+    # build: .
+    image: ghcr.io/bry5an/tver-dl:4835aac4ae27ef1f7649007b3248a2fafbe04764
+    container_name: tver-dl
     depends_on:
       gluetun:
         condition: service_started

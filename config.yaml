@@ -20,7 +20,7 @@ series:
       url: https://tver.jp/series/srtsxzl3si
       subtitles: false
 
-  Variety_shows:
+  Variety:
     - name: 世界の果てまでイッテQ！
       url: https://tver.jp/series/sr9gfdf2ex
       subtitles: false
@@ -29,7 +29,6 @@ series:
     - name: ホンマでっか！？TV
       url: https://tver.jp/series/srbcuxhq2k
 
-  Documentary:
     - name: ザ・ノンフィクション
       url: https://tver.jp/series/sr7vfvos9u
       enabled: false
