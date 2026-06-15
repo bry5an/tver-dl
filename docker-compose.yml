@@ -23,6 +23,6 @@ services:
     network_mode: "service:gluetun"
     env_file:
       - .env
-    environment:
-      CONFIG_URL: https://raw.githubusercontent.com/bry5an/tver-dl/refs/heads/main/config.yaml
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
     restart: "no"
