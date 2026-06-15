@@ -1,13 +1,4 @@
 services:
-  config:
-    image: curlimages/curl
-    command: >
-      sh -c "curl -fsSL $CONFIG_URL -o /config/config.yaml"
-    volumes:
-      - config-volume:/config
-    environment:
-      CONFIG_URL: https://raw.githubusercontent.com/bry5an/tver-dl/refs/heads/main/config.yaml
-
   gluetun:
     image: qmcgaw/gluetun
     container_name: gluetun
@@ -25,16 +16,11 @@ services:
   tver-dl:
     build: .
     depends_on:
-      config:
-        condition: service_completed_successfully
       gluetun:
         condition: service_started
     network_mode: "service:gluetun"
     env_file:
       - .env
-    volumes:
-      - config-volume:/config
-    restart: unless-stopped
-
-volumes:
-  config-volume:
+    environment:
+      CONFIG_URL: https://raw.githubusercontent.com/bry5an/tver-dl/refs/heads/main/config.yaml
+    restart: "no"
