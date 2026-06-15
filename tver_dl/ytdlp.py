@@ -1,5 +1,6 @@
 import logging
 import subprocess
+import sys
 import threading
 import re
 from pathlib import Path
@@ -22,7 +23,7 @@ class YtDlpHandler:
             self.logger.info(f"Using yt-dlp to extract episodes from: {series_url}")
             
             cmd = [
-                "yt-dlp",
+                sys.executable, "-m", "yt_dlp",
                 "--skip-download",
                 "--print", "%(id)s|%(title)s|%(webpage_url)s",
                 "--no-warnings",
@@ -226,7 +227,7 @@ class YtDlpHandler:
             base_options.extend(["-o", f"{download_path}/%(series)s/%(title)s"])
 
         cmd = [
-            "yt-dlp",
+            sys.executable, "-m", "yt_dlp",
             # No archive file here!
             *base_options,
             "-P", download_path,
