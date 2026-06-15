@@ -40,7 +40,7 @@ series:
     - name: 所さんの目がテン！
       url: https://tver.jp/series/srvjalspte
 
-download_path: /mnt/media/Video
+download_path: /mnt/media
 debug: false
 subtitles_only: false
 history:

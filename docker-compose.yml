@@ -15,7 +15,7 @@ services:
 
   tver-dl:
     # build: .
-    image: ghcr.io/bry5an/tver-dl:4835aac4ae27ef1f7649007b3248a2fafbe04764
+    image: ghcr.io/bry5an/tver-dl:latest
     container_name: tver-dl
     depends_on:
       gluetun:
@@ -25,4 +25,5 @@ services:
       - .env
     volumes:
       - ./config.yaml:/config/config.yaml:ro
+      - /mnt/media:/mnt/media
     restart: "no"
