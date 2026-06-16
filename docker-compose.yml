@@ -16,6 +16,7 @@ services:
   tver-dl:
     # build: .
     image: ghcr.io/bry5an/tver-dl:latest
+    pull_policy: always
     container_name: tver-dl
     depends_on:
       gluetun:
