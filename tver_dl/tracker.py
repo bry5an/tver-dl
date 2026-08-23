@@ -157,13 +157,17 @@ class DatabaseTracker(BaseTracker):
                     except ValueError:
                         ep_num = None
 
+                    subtitles_enabled = download_info.get("subtitles_enabled", True)
+                    checked_at = datetime.now() if subtitles_enabled else None
+
                     cur.execute("""
                         INSERT INTO episodes (series_id, tver_episode_id, title, episode_number, episode_url, subtitles_checked_at)
-                        VALUES (%s, %s, %s, %s, %s, now())
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         ON CONFLICT (tver_episode_id) DO UPDATE
-                        SET title = EXCLUDED.title, subtitles_checked_at = now()
+                        SET title = EXCLUDED.title,
+                            subtitles_checked_at = COALESCE(EXCLUDED.subtitles_checked_at, episodes.subtitles_checked_at)
                         RETURNING id
-                    """, (series_id, tver_episode_id, episode_info["title"], ep_num, ep_url))
+                    """, (series_id, tver_episode_id, episode_info["title"], ep_num, ep_url, checked_at))
                     episode_id = cur.fetchone()[0]
 
                     # 3. INSERT Download
@@ -181,31 +185,35 @@ class DatabaseTracker(BaseTracker):
                     """, (episode_id, file_path, file_size, self.hostname))
 
                     # 4. INSERT/UPDATE Subtitles
-                    sub_status = 'downloaded' if has_subtitles else 'missing'
-                    subtitle_format = download_info.get("subtitle_format")
-                    
-                    cur.execute("""
-                        INSERT INTO subtitles (
-                            episode_id, status, checked_at, downloaded_at,
-                            subtitle_format, series_name, episode_title
-                        )
-                        VALUES (%s, %s, now(), %s, %s, %s, %s)
-                        ON CONFLICT (episode_id) DO UPDATE
-                        SET status = EXCLUDED.status, 
-                            checked_at = now(),
-                            downloaded_at = COALESCE(EXCLUDED.downloaded_at, subtitles.downloaded_at),
-                            subtitle_format = EXCLUDED.subtitle_format,
-                            series_name = EXCLUDED.series_name,
-                            episode_title = EXCLUDED.episode_title
-                    """, (
-                        episode_id, 
-                        sub_status, 
-                        datetime.now() if has_subtitles else None,
-                        subtitle_format,
-                        series_info["name"],
-                        episode_info["title"]
-                    ))
-                    
+                    # Series with subtitles disabled in config are never checked,
+                    # so don't record them as 'missing'
+                    if subtitles_enabled:
+                        sub_status = 'downloaded' if has_subtitles else 'missing'
+                        subtitle_format = download_info.get("subtitle_format")
+
+                        cur.execute("""
+                            INSERT INTO subtitles (
+                                episode_id, status, checked_at, downloaded_at,
+                                subtitle_format, series_name, episode_title
+                            )
+                            VALUES (%s, %s, now(), %s, %s, %s, %s)
+                            ON CONFLICT (episode_id) DO UPDATE
+                            SET status = EXCLUDED.status,
+                                checked_at = now(),
+                                downloaded_at = COALESCE(EXCLUDED.downloaded_at, subtitles.downloaded_at),
+                                subtitle_format = EXCLUDED.subtitle_format,
+                                series_name = EXCLUDED.series_name,
+                                episode_title = EXCLUDED.episode_title
+                        """, (
+                            episode_id,
+                            sub_status,
+                            datetime.now() if has_subtitles else None,
+                            subtitle_format,
+                            series_info["name"],
+                            episode_info["title"]
+                        ))
+
+
                 conn.commit()
         except Exception as e:
             self.logger.error(f"Error adding download to DB: {e}")

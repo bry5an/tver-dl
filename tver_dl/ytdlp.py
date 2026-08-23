@@ -1,8 +1,10 @@
 import logging
+import os
 import subprocess
 import sys
 import threading
 import re
+import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Callable
 
@@ -62,7 +64,7 @@ class YtDlpHandler:
             self.logger.error(f"Error extracting episodes: {e}", exc_info=self.debug)
             return []
 
-    def download(self, episodes: List[Dict[str, str]], series_name: str, progress_callback: Optional[Callable[[float], None]] = None, category: Optional[str] = None) -> List[Dict]:
+    def download(self, episodes: List[Dict[str, str]], series_name: str, progress_callback: Optional[Callable[[float], None]] = None, category: Optional[str] = None, subtitles_enabled: bool = True) -> List[Dict]:
         """Download episodes using yt-dlp and return details of successful downloads."""
         if not episodes:
             return []
@@ -156,7 +158,7 @@ class YtDlpHandler:
             stdout, stderr = process.communicate()
             
             # Additional processing for subtitles if needed (checks existence)
-            self._process_download_results(success_results, download_path, series_name)
+            self._process_download_results(success_results, download_path, series_name, subtitles_enabled)
             
             if process.returncode == 0:
                 self.logger.info("✓ Download process completed")
@@ -216,12 +218,6 @@ class YtDlpHandler:
             base_options.extend(["--sub-lang", "ja"])
 
             # Explicitly set output template for subtitles to avoid .unknown_video
-            # We use the config's output template if we can find it, otherwise default
-            # But wait, we just removed it. 
-            # If the user has a preferred structure, we should keep it but adapt it?
-            # Actually, yt-dlp might fail to name the subtitle correctly without the video.
-            # Let's enforce a standard template for subtitles-only to match what we expect
-            # or try to extract the user's template.
             # A safe bet is:
             base_options.extend(["--convert-subs", "vtt"])
             base_options.extend(["-o", f"{download_path}/%(series)s/%(title)s"])
@@ -239,37 +235,72 @@ class YtDlpHandler:
             
         return cmd
 
-    def _process_download_results(self, results: List[Dict], download_path: str, series_name: str):
+    def _process_download_results(self, results: List[Dict], download_path: str, series_name: str, subtitles_enabled: bool = True):
         """Check for subtitles and update report."""
         download_dir = Path(download_path)
-        
+
         for item in results:
             episode_name = item["episode_name"]
-            # Check if subtitle exists for this episode
-            subtitle_format = self._get_subtitle_format(download_dir, episode_name)
-            
+            self.download_report[series_name]["success"].append(episode_name)
+
+            if not subtitles_enabled:
+                # Series has subtitles: false — don't check or report
+                item["subtitles"] = False
+                item["subtitle_format"] = None
+                continue
+
+            # Prefer checking next to the actual downloaded file; fall back to title search
+            subtitle_format = None
+            if item.get("filepath"):
+                subtitle_format = self._get_subtitle_format_for_video(item["filepath"])
+            if not subtitle_format:
+                subtitle_format = self._get_subtitle_format(download_dir, episode_name)
+
             # Update the result item with subtitle status for history tracking
             item["subtitles"] = bool(subtitle_format)
             item["subtitle_format"] = subtitle_format
-            
-            self.download_report[series_name]["success"].append(episode_name)
-            
+
             if not subtitle_format:
                 self.logger.warning(f"Missing subtitle for: {episode_name}")
                 self.download_report[series_name]["missing_subtitles"].append(episode_name)
+
+    SUBTITLE_EXTS = ("vtt", "srt", "ass")
+
+    @staticmethod
+    def _nfc(value: str) -> str:
+        # macOS returns NFD-normalized filenames while TVer titles are NFC,
+        # so filenames must be compared in a single normalization form.
+        return unicodedata.normalize("NFC", value)
+
+    def _get_subtitle_format_for_video(self, video_path: str) -> Optional[str]:
+        """Return the subtitle extension if a subtitle file sits next to the video file."""
+        video = Path(video_path)
+        try:
+            entries = os.listdir(video.parent)
+        except OSError:
+            return None
+        stem = self._nfc(video.stem)
+        for name in entries:
+            norm = self._nfc(name)
+            if not norm.startswith(stem):
+                continue
+            remainder = norm[len(stem):]
+            for ext in self.SUBTITLE_EXTS:
+                if remainder.startswith(".") and remainder.endswith(f".{ext}"):
+                    return ext
+        return None
 
     def _has_subtitle(self, download_dir: Path, title: str) -> bool:
         """Check if any subtitle file exists for the title."""
         return bool(self._get_subtitle_format(download_dir, title))
 
     def _get_subtitle_format(self, download_dir: Path, title: str) -> Optional[str]:
-        """Return the extension of the subtitle file if it exists."""
-        # Sanitize title for globbing if needed, though usually yt-dlp cleans it.
-        # We'll try to match the title in the filename.
-        # Note: glob might be sensitive to special chars in title.
-        for ext in ["vtt", "srt", "ass"]:
-            # Escape brackets for glob if they exist in title
-            safe_title = title.replace("[", "[[]").replace("]", "[]]")
-            if list(download_dir.glob(f"**/*{safe_title}*.{ext}")):
-                return ext
+        """Return the extension of a subtitle file whose name contains the title."""
+        target = self._nfc(title)
+        for _root, _dirs, files in os.walk(download_dir):
+            for name in files:
+                norm = self._nfc(name)
+                for ext in self.SUBTITLE_EXTS:
+                    if norm.endswith(f".{ext}") and target in norm:
+                        return ext
         return None

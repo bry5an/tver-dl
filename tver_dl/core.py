@@ -7,7 +7,6 @@ import re
 from rich.logging import RichHandler
 
 from .config import ConfigManager
-from .vpn import VPNChecker
 from .filter import EpisodeFilter
 from .ytdlp import YtDlpHandler
 from .display import DisplayManager
@@ -43,7 +42,6 @@ class TVerDownloader:
         self.debug = self.debug or self.config.get("debug", False)
         self.subtitles_only = self.subtitles_only or self.config.get("subtitles_only", False)
         
-        self.vpn_checker = VPNChecker(self.logger)
         self.filter = EpisodeFilter(self.logger)
         self.ytdlp = YtDlpHandler(self.config, self.logger, self.debug, self.subtitles_only)
         self.api = TVerClient(self.logger)
@@ -62,14 +60,10 @@ class TVerDownloader:
             history_file = Path(download_path) / csv_path
             self.tracker = CSVTracker(history_file, self.logger)
 
-    def run(self, skip_vpn_check: bool = False, max_workers: int = 3):
+    def run(self, max_workers: int = 3):
         """Execute the main download workflow."""
         print("TVer Auto Downloader")
         print("=" * 60)
-
-        if not skip_vpn_check and not self.vpn_checker.check():
-            print("\nExiting...")
-            return
 
         enabled_series = [s for s in self.config.get("series", []) if s.get("enabled", True)]
         if not enabled_series:
@@ -105,6 +99,13 @@ class TVerDownloader:
         task_id = self.display.add_series_task(series_name)
         self.display.start_task(task_id)
 
+        subtitles_enabled = series.get("subtitles", True)
+        if self.subtitles_only and not subtitles_enabled:
+            self.logger.debug(f"Skipping {series_name} (subtitles disabled)")
+            self.display.update_status(task_id, "[yellow]Subs disabled")
+            self.display.update_progress(task_id, total=1, advance=1)
+            return 0
+
         # 1. Extract
         self.display.update_status(task_id, "Extracting...")
         
@@ -138,10 +139,9 @@ class TVerDownloader:
         # - Are missing subtitles
         subtitle_retries = []
         if self.subtitles_only and isinstance(self.tracker, DatabaseTracker):
-            if series.get("subtitles", True):
-                self.display.update_status(task_id, "Checking missing subs...")
-                missing_subs = self.tracker.get_episodes_needing_subtitles(series_url)
-            
+            self.display.update_status(task_id, "Checking missing subs...")
+            missing_subs = self.tracker.get_episodes_needing_subtitles(series_url)
+
             for missing in missing_subs:
                 # Need to map back to the full episode object format if possible, or construct enough
                 # We have url, title, episode_number from DB.
@@ -155,11 +155,9 @@ class TVerDownloader:
                         "episode_number": missing.get("episode_number"),
                         "series_name": series_name # Helper
                     })
-            
+
             if subtitle_retries:
                 self.logger.info(f"Found {len(subtitle_retries)} episodes needing subtitle retry for {series_name}")
-            elif not series.get("subtitles", True):
-                self.logger.debug(f"Skipped subtitle retry check for {series_name} (subtitles disabled)")
         
         final_download_list = new_episodes + subtitle_retries
 
@@ -181,10 +179,11 @@ class TVerDownloader:
             self.display.update_progress(task_id, completed=progress)
 
         results = self.ytdlp.download(
-            final_download_list, 
-            series_name, 
+            final_download_list,
+            series_name,
             progress_callback,
-            category=series.get("category")
+            category=series.get("category"),
+            subtitles_enabled=subtitles_enabled
         )
         
         # Update Tracker
@@ -198,7 +197,9 @@ class TVerDownloader:
                 },
                 download_info={
                     "filepath": item["filepath"],
-                    "subtitles": item["subtitles"]
+                    "subtitles": item["subtitles"],
+                    "subtitle_format": item.get("subtitle_format"),
+                    "subtitles_enabled": subtitles_enabled
                 }
             )
         
